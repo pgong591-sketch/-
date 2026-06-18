@@ -1,0 +1,37 @@
+# Local environment
+.DS_Store
+.env
+.venv/
+venv/
+ENV/
+
+# Python caches and test output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Streamlit local secrets and runtime logs
+.streamlit/secrets.toml
+*.log
+.dbsync.local.json
+
+# Real business data and generated files
+backups/
+data/
+sync/
+.finance_dw_sync/
+.finance_dw_sync*/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.bak
+*.backup
+*.xls
+*.xlsx
+
+# Keep code-managed examples/templates outside data/ if they need to be versioned.
+# Put sanitized fixtures under tests/fixtures/ or docs/ instead.

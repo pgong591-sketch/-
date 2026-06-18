@@ -1,0 +1,41 @@
+﻿[2026-06-11 10:16:57] Merge started
+Project: D:\deepseek V4\finance_dw
+Runtime: D:\E_Drive_Migrated\finance_dw_runtime
+Backed up active DB to D:\deepseek V4\finance_dw\backups\pre_runtime_merge_20260611-101657
+
+-------------------------------------------------------------------------------
+   ROBOCOPY     ::     Robust File Copy for Windows                              
+-------------------------------------------------------------------------------
+
+  Started : 2026611 10:16:57
+   Source : D:\E_Drive_Migrated\finance_dw_runtime\backups\
+     Dest : D:\deepseek V4\finance_dw\backups\runtime_migrated\
+
+    Files : *.*
+	    
+  Options : *.* /FFT /S /E /DCOPY:DAT /COPY:DAT /NP /XJ /R:2 /W:2 
+
+------------------------------------------------------------------------------
+
+	                   4	D:\E_Drive_Migrated\finance_dw_runtime\backups\
+	    New File  		   2.5 m	finance_dw_backup_20260609_110604.db
+	    New File  		   2.5 m	finance_dw_backup_20260609_111113.db
+	    New File  		   2.5 m	finance_dw_backup_20260610_092137.db
+	    New File  		   2.5 m	finance_dw_backup_20260611_092355.db
+
+------------------------------------------------------------------------------
+
+               Total    Copied   Skipped  Mismatch    FAILED    Extras
+    Dirs :         1         0         1         0         0         0
+   Files :         4         4         0         0         0         0
+   Bytes :   10.01 m   10.01 m         0         0         0         0
+   Times :   0:00:00   0:00:00                       0:00:00   0:00:00
+
+
+   Speed :           2625536000 Bytes/sec.
+   Speed :           150234.375 MegaBytes/min.
+   Ended : 2026611 10:16:57
+
+Runtime backups robocopy exit code: 1
+Copied runtime DB to active DB and archived copy: D:\deepseek V4\finance_dw\data\finance_dw_runtime_20260611-101657.db
+[2026-06-11 10:16:57] Merge finished
