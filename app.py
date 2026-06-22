@@ -67,6 +67,11 @@ from src.account_standardization import (
     upsert_account_mapping,
     upsert_standard_account,
 )
+from src.base_settings_service import (
+    get_base_health_checks,
+    get_base_settings_overview,
+    resolve_company_identity,
+)
 
 try:
     import plotly.express as px
@@ -1583,6 +1588,87 @@ def _alerts_html(anomalies: list[dict]) -> str:
 # 侧边栏
 # ============================================================================
 
+NAV_MODULE_SECTIONS = {
+    "经营中心": {
+        "经营看板": ["首页", "利润表总览驾驶舱", "利润表明细（原表）", "费用科目分析", "多维图片简报", "多期对比"],
+        "经营测算": ["盈亏平衡测算"],
+    },
+    "数据中心": {
+        "数据采集": ["数据导入", "明细表查询"],
+    },
+    "财务中心": {
+        "基础报表": ["科目余额表", "资产负债表", "损益表", "现金流量表"],
+        "管理报表": ["贡献式利润表", "多维损益表", "合并报表"],
+        "报表处理": ["核算记录"],
+    },
+    "基础设置": {
+        "主数据与口径": ["基础设置"],
+    },
+}
+
+NAV_LABELS = {
+    "首页": "驾驶舱",
+    "数据导入": "数据导入",
+    "明细表查询": "明细查询",
+    "科目余额表": "科目余额",
+    "资产负债表": "资产负债表",
+    "损益表": "损益表",
+    "现金流量表": "现金流量表",
+    "核算记录": "核算记录",
+    "多维图片简报": "图片简报",
+    "贡献式利润表": "贡献式利润表",
+    "多维损益表": "损益表",
+    "多维经营汇总表": "经营汇总表",
+    "利润表总览驾驶舱": "利润驾驶舱",
+    "利润表明细（原表）": "经营汇总表",
+    "费用科目分析": "费用分析",
+    "合并报表": "合并报表",
+    "多期对比": "多期对比",
+    "盈亏平衡测算": "盈亏平衡测算",
+    "基础设置": "基础设置",
+    "公司层级": "公司层级",
+    "系统管理": "系统管理",
+}
+
+
+def _sidebar_page_module_map(module_sections: dict[str, dict[str, list[str]]] | None = None) -> dict[str, str]:
+    sections = module_sections or NAV_MODULE_SECTIONS
+    return {
+        item: module
+        for module, grouped_pages in sections.items()
+        for pages in grouped_pages.values()
+        for item in pages
+    }
+
+
+def _normalize_sidebar_page(current: str | None) -> str:
+    page = str(current or "首页")
+    if page in {"公司层级", "系统管理"}:
+        return "基础设置"
+    return page if page in _sidebar_page_module_map() else "首页"
+
+
+def _sidebar_expanded_state(
+    current_page: str,
+    existing: dict[str, bool] | None = None,
+    module_sections: dict[str, dict[str, list[str]]] | None = None,
+) -> dict[str, bool]:
+    sections = module_sections or NAV_MODULE_SECTIONS
+    page_module = _sidebar_page_module_map(sections)
+    active_module = page_module.get(current_page, next(iter(sections)))
+    existing = existing if isinstance(existing, dict) else {}
+    return {
+        module: bool(existing[module]) if module in existing else module == active_module
+        for module in sections
+    }
+
+
+def _toggle_sidebar_module(expanded_modules: dict[str, bool], module_name: str) -> dict[str, bool]:
+    updated = dict(expanded_modules)
+    updated[module_name] = not bool(updated.get(module_name, False))
+    return updated
+
+
 def render_sidebar():
     with st.sidebar:
         st.markdown(
@@ -1590,100 +1676,54 @@ def render_sidebar():
             unsafe_allow_html=True,
         )
         st.markdown("---")
-        module_sections = {
-            "经营中心": {
-                "经营看板": ["首页", "利润表总览驾驶舱", "利润表明细（原表）", "费用科目分析", "多维图片简报", "多期对比"],
-                "经营测算": ["盈亏平衡测算"],
-            },
-            "数据中心": {
-                "数据采集": ["数据导入", "明细表查询"],
-            },
-            "财务中心": {
-                "基础报表": ["科目余额表", "资产负债表", "损益表", "现金流量表"],
-                "管理报表": ["贡献式利润表", "多维损益表", "合并报表"],
-                "报表处理": ["核算记录"],
-            },
-            "基础设置": {
-                "组织与系统": ["公司层级", "系统管理"],
-            },
-        }
-        labels = {
-            "首页": "驾驶舱",
-            "数据导入": "数据导入",
-            "明细表查询": "明细查询",
-            "科目余额表": "科目余额",
-            "资产负债表": "资产负债表",
-            "损益表": "损益表",
-            "现金流量表": "现金流量表",
-            "核算记录": "核算记录",
-            "多维图片简报": "图片简报",
-            "贡献式利润表": "贡献式利润表",
-            "多维损益表": "损益表",
-            "多维经营汇总表": "经营汇总表",
-            "利润表总览驾驶舱": "利润驾驶舱",
-            "利润表明细（原表）": "经营汇总表",
-            "费用科目分析": "费用分析",
-            "合并报表": "合并报表",
-            "多期对比": "多期对比",
-            "盈亏平衡测算": "盈亏平衡测算",
-            "公司层级": "公司层级",
-            "系统管理": "系统管理",
-        }
-        current = st.session_state.get("nav_choice", "首页")
-        page_module = {
-            item: module
-            for module, sections in module_sections.items()
-            for items in sections.values()
-            for item in items
-        }
-        valid_pages = set(page_module)
-        if current not in valid_pages:
-            current = "首页"
-
-        module_options = list(module_sections.keys())
-        default_module = page_module.get(current, module_options[0])
-        if (
-            "nav_module" not in st.session_state
-            or st.session_state.nav_module not in module_options
-        ):
-            st.session_state.nav_module = default_module
-
-        selected_module = st.pills(
-            "业务模块",
-            module_options,
-            selection_mode="single",
-            default=st.session_state.nav_module,
-            key="nav_module_pills",
-            label_visibility="collapsed",
-            width="stretch",
-        )
-        if selected_module in module_options:
-            st.session_state.nav_module = selected_module
-        active_module = st.session_state.nav_module
-
-        st.markdown(
-            f'<div class="nav-current-module"><span>{_html(active_module)}</span><span>导航</span></div>',
-            unsafe_allow_html=True,
-        )
-
-        if current not in {
-            item
-            for items in module_sections[active_module].values()
-            for item in items
-        }:
-            first_section = next(iter(module_sections[active_module].values()))
-            current = first_section[0]
+        module_sections = NAV_MODULE_SECTIONS
+        labels = NAV_LABELS
+        current = _normalize_sidebar_page(st.session_state.get("nav_choice", "首页"))
+        if st.session_state.get("nav_choice") != current:
             st.session_state.nav_choice = current
+        page_module = _sidebar_page_module_map(module_sections)
+        active_module = page_module.get(current, next(iter(module_sections)))
+        expanded_modules = _sidebar_expanded_state(
+            current,
+            st.session_state.get("sidebar_expanded_modules"),
+            module_sections,
+        )
+        st.session_state["sidebar_expanded_modules"] = expanded_modules
+        st.session_state.nav_module = active_module
 
-        for section, items in module_sections[active_module].items():
-            st.markdown(f'<div class="nav-section-title">{section}</div>', unsafe_allow_html=True)
-            for item in items:
-                button_type = "primary" if current == item else "secondary"
-                if st.button(labels[item], key=f"nav_{item}", type=button_type, use_container_width=True):
-                    st.session_state.nav_choice = item
-                    current = item
-                    st.session_state.nav_module = page_module.get(item, active_module)
-                    st.rerun()
+        for module_name, sections in module_sections.items():
+            is_active_module = module_name == active_module
+            is_expanded = bool(st.session_state["sidebar_expanded_modules"].get(module_name, is_active_module))
+            arrow = "▾" if is_expanded else "▸"
+            button_type = "primary" if is_active_module else "secondary"
+            if st.button(
+                f"{module_name}{arrow}",
+                key=f"nav_module_toggle_{module_name}",
+                type=button_type,
+                use_container_width=True,
+            ):
+                st.session_state["sidebar_expanded_modules"] = _toggle_sidebar_module(
+                    st.session_state["sidebar_expanded_modules"],
+                    module_name,
+                )
+                st.rerun()
+
+            if not st.session_state["sidebar_expanded_modules"].get(module_name, is_active_module):
+                continue
+
+            for section, items in sections.items():
+                st.markdown(f'<div class="nav-section-title">{section}</div>', unsafe_allow_html=True)
+                for item in items:
+                    item_type = "primary" if current == item else "secondary"
+                    if st.button(labels[item], key=f"nav_{item}", type=item_type, use_container_width=True):
+                        st.session_state.nav_choice = item
+                        st.session_state.nav_module = page_module.get(item, module_name)
+                        st.session_state["sidebar_expanded_modules"] = _sidebar_expanded_state(
+                            item,
+                            st.session_state["sidebar_expanded_modules"],
+                            module_sections,
+                        )
+                        st.rerun()
 
         st.markdown('<div class="sidebar-note">本地数据仓库 · SQLite</div>', unsafe_allow_html=True)
     return current
@@ -6008,6 +6048,293 @@ def render_company_hierarchy():
                 st.success(f"共 {len(subtree)} 家公司（含自身）")
                 st.dataframe(subtree[["code", "name", "level", "tree_path"]], use_container_width=True, hide_index=True)
 
+
+BASE_SETTINGS_READ_TABLES = {
+    "company_aliases",
+    "import_issue_pool",
+    "base_settings_change_log",
+    "name_collection_rules",
+}
+
+
+def _base_settings_table_exists(table_name: str) -> bool:
+    if table_name not in BASE_SETTINGS_READ_TABLES:
+        return False
+    try:
+        df = execute_sql(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name = :name",
+            {"name": table_name},
+        )
+        return len(df) > 0
+    except Exception:
+        return False
+
+
+def _base_settings_table_columns(table_name: str) -> list[str]:
+    if table_name not in BASE_SETTINGS_READ_TABLES or not _base_settings_table_exists(table_name):
+        return []
+    try:
+        df = execute_sql(f"PRAGMA table_info({table_name})")
+    except Exception:
+        return []
+    if df.empty or "name" not in df:
+        return []
+    return [str(row["name"]) for _, row in df.iterrows()]
+
+
+def _base_settings_read_table(table_name: str, limit: int = 200) -> pd.DataFrame:
+    if table_name not in BASE_SETTINGS_READ_TABLES or not _base_settings_table_exists(table_name):
+        return pd.DataFrame()
+    columns = _base_settings_table_columns(table_name)
+    order_col = next((col for col in ["created_at", "updated_at", "update_time", "id"] if col in columns), "")
+    order_sql = f" ORDER BY {order_col} DESC" if order_col else ""
+    try:
+        return execute_sql(f"SELECT * FROM {table_name}{order_sql} LIMIT :limit", {"limit": int(limit)})
+    except Exception:
+        return pd.DataFrame()
+
+
+def _base_settings_alias_rows() -> pd.DataFrame:
+    if not _base_settings_table_exists("company_aliases"):
+        return pd.DataFrame()
+    try:
+        return execute_sql(
+            """
+            SELECT
+                a.alias AS 别名,
+                CAST(a.company_code AS TEXT) AS 公司编码,
+                COALESCE(c.name, '') AS 公司名称,
+                COALESCE(a.source, '') AS 来源,
+                CASE COALESCE(a.status, 1) WHEN 1 THEN '启用' ELSE '停用' END AS 状态,
+                COALESCE(a.updated_at, a.created_at, '') AS 更新时间
+            FROM company_aliases a
+            LEFT JOIN companies c ON c.code = a.company_code
+            ORDER BY a.alias
+            LIMIT 500
+            """
+        )
+    except Exception:
+        return pd.DataFrame()
+
+
+def _base_settings_alias_conflicts() -> pd.DataFrame:
+    if not _base_settings_table_exists("company_aliases"):
+        return pd.DataFrame()
+    try:
+        return execute_sql(
+            """
+            SELECT
+                alias AS 别名,
+                COUNT(DISTINCT company_code) AS 指向公司数,
+                GROUP_CONCAT(DISTINCT company_code) AS 公司编码
+            FROM company_aliases
+            WHERE COALESCE(status, 1) = 1
+              AND alias IS NOT NULL
+              AND TRIM(alias) != ''
+            GROUP BY alias
+            HAVING COUNT(DISTINCT company_code) > 1
+            ORDER BY alias
+            """
+        )
+    except Exception:
+        return pd.DataFrame()
+
+
+def _base_metric_value(value) -> str:
+    if value is None:
+        return "待接入"
+    try:
+        return f"{int(value):,}"
+    except Exception:
+        return str(value)
+
+
+def _render_base_settings_home():
+    st.markdown("#### 基础数据体检")
+    overview = get_base_settings_overview()
+    metrics = [
+        ("公司数量", "company_count"),
+        ("公司别名数量", "alias_count"),
+        ("公司档案数量", "dimension_count"),
+        ("股权关系数量", "ownership_count"),
+        ("未分组公司数量", "ungrouped_company_count"),
+        ("别名冲突数量", "alias_conflict_count"),
+        ("未识别公司名数量", "unresolved_company_name_count"),
+        ("公司档案缺失数量", "missing_dimension_count"),
+        ("tree_path 异常数量", "tree_path_issue_count"),
+    ]
+    for start in range(0, len(metrics), 3):
+        cols = st.columns(3)
+        for col, (label, key) in zip(cols, metrics[start:start + 3]):
+            col.metric(label, _base_metric_value(overview.get(key)))
+
+    checks = pd.DataFrame(get_base_health_checks())
+    if len(checks):
+        checks_display = checks.rename(columns={
+            "label": "检查项",
+            "severity": "级别",
+            "count": "数量",
+            "status": "状态",
+        })[["检查项", "级别", "数量", "状态"]]
+        st.markdown("#### 数据治理检查")
+        st.dataframe(checks_display, use_container_width=True, hide_index=True, height=260)
+    else:
+        st.info("暂无基础数据体检结果。")
+
+
+def _render_base_settings_org():
+    st.info("组织架构用于维护公司上下级、组织树和合并范围；不要用它调整经营分析业务模块。")
+    render_company_hierarchy()
+
+
+def _render_base_settings_company_profile():
+    st.info("组织架构用于维护公司上下级和合并范围；公司档案中的业务模块用于经营分析口径；调整业务模块不要修改公司上级。")
+    try:
+        dim_df = get_company_dimensions()
+    except Exception as exc:
+        st.error(f"公司档案加载失败: {exc}")
+        return
+
+    if len(dim_df) == 0:
+        st.info("暂无公司档案数据。")
+        return
+
+    dim_edit = dim_df.rename(columns={
+        "company_id": "公司编码",
+        "company_name": "公司名称",
+        "business_group": "所属板块",
+        "business_type": "业态类型",
+        "region": "所属区域",
+        "is_operational": "运营主体",
+        "parent_code": "上级编码",
+        "level": "层级",
+    })
+    visible_cols = ["公司编码", "公司名称", "所属板块", "业态类型", "所属区域", "运营主体", "上级编码", "层级"]
+    edited_dim = st.data_editor(
+        dim_edit[visible_cols],
+        use_container_width=True,
+        hide_index=True,
+        height=560,
+        column_config={
+            "公司编码": st.column_config.TextColumn("公司编码", width="small", disabled=True),
+            "公司名称": st.column_config.TextColumn("公司名称", width="medium", disabled=True),
+            "所属板块": st.column_config.SelectboxColumn("所属板块", options=BUSINESS_GROUP_OPTIONS, width="small"),
+            "业态类型": st.column_config.SelectboxColumn("业态类型", options=BUSINESS_TYPE_OPTIONS, width="small"),
+            "所属区域": st.column_config.SelectboxColumn("所属区域", options=REGION_OPTIONS, width="small"),
+            "运营主体": st.column_config.SelectboxColumn("运营主体", options=OPERATIONAL_OPTIONS, width="small"),
+            "上级编码": st.column_config.TextColumn("上级编码", width="small", disabled=True),
+            "层级": st.column_config.NumberColumn("层级", width="small", disabled=True),
+        },
+        disabled=["公司编码", "公司名称", "上级编码", "层级"],
+        key="base_settings_company_dimension_editor",
+    )
+    if st.button("保存公司档案", type="primary", use_container_width=True):
+        try:
+            saved = save_company_dimensions(edited_dim)
+            st.toast(f"已保存 {saved} 家公司档案")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"保存公司档案失败: {exc}")
+
+
+def _render_base_settings_naming():
+    st.info("名称口径用于维护公司别名和文件名识别。模糊匹配只能作为建议，不能自动写入正式别名。")
+    probe = st.text_input("公司名 / 文件名识别预检", key="base_settings_identity_probe")
+    if probe.strip():
+        result = resolve_company_identity(probe.strip(), mode="fuzzy")
+        if result.get("ok"):
+            st.success(f"已精确识别：{result['company_code']} - {result['company_name']}")
+        elif result.get("suggestions"):
+            st.warning("未精确命中，以下仅为建议，需人工确认后才能维护别名。")
+            st.dataframe(pd.DataFrame(result["suggestions"]), use_container_width=True, hide_index=True)
+        else:
+            st.info("未识别到候选公司。")
+
+    alias_df = _base_settings_alias_rows()
+    st.markdown("#### 公司别名")
+    if len(alias_df):
+        st.dataframe(alias_df, use_container_width=True, hide_index=True, height=320)
+        st.download_button(
+            "导出别名清单",
+            alias_df.to_csv(index=False).encode("utf-8-sig"),
+            file_name="公司别名清单.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+    else:
+        st.info("暂无公司别名数据。")
+
+    conflicts = _base_settings_alias_conflicts()
+    st.markdown("#### 冲突别名")
+    if len(conflicts):
+        st.error(f"发现 {len(conflicts)} 个启用别名指向多个公司。")
+        st.dataframe(conflicts, use_container_width=True, hide_index=True)
+    else:
+        st.success("当前没有发现启用别名冲突。")
+
+    st.markdown("#### 未识别公司名")
+    issue_df = _base_settings_read_table("import_issue_pool", limit=100)
+    if len(issue_df):
+        st.dataframe(issue_df, use_container_width=True, hide_index=True, height=260)
+    else:
+        st.info("导入问题池未接入或暂无未识别公司名记录。")
+
+    with st.expander("别名导入入口", expanded=False):
+        st.caption("正式写入 company_aliases 前必须人工确认。本轮只保留入口，不做模糊匹配自动入库。")
+
+
+def _render_base_settings_collection_rules():
+    st.info("归集规则第一版只展示现有口径和维护入口，不修改经营汇总计算逻辑。")
+    standard_items = [row.get("费用科目") for row in build_empty_operating_summary_rows()]
+    item_df = pd.DataFrame({"经营汇总标准项目": standard_items})
+    st.markdown("#### 经营项目归集")
+    st.dataframe(item_df, use_container_width=True, hide_index=True, height=260)
+
+    rules_df = _base_settings_read_table("name_collection_rules", limit=200)
+    st.markdown("#### 名称归集规则表")
+    if len(rules_df):
+        st.dataframe(rules_df, use_container_width=True, hide_index=True, height=260)
+    else:
+        st.info("name_collection_rules 尚未接入或暂无数据；后续可在这里集中维护业务模块历史名称、经营项目、科目指标归集。")
+
+
+def _render_base_settings_import_issues():
+    st.markdown("#### 导入问题池")
+    issue_df = _base_settings_read_table("import_issue_pool", limit=300)
+    if len(issue_df):
+        st.dataframe(issue_df, use_container_width=True, hide_index=True, height=520)
+    else:
+        st.info("导入预检中发现的未识别公司、未识别项目、未识别科目后续将在这里集中处理。当前表结构未接入或暂无数据。")
+
+
+def _render_base_settings_change_log():
+    st.markdown("#### 变更记录")
+    log_df = _base_settings_read_table("base_settings_change_log", limit=300)
+    if len(log_df):
+        st.dataframe(log_df, use_container_width=True, hide_index=True, height=520)
+    else:
+        st.info("后续用于记录公司档案、名称口径、归集规则等基础设置变更。当前表结构未接入或暂无数据。")
+
+
+def render_base_settings():
+    st.markdown('<div class="page-header">⚙️ 基础设置</div>', unsafe_allow_html=True)
+    tabs = st.tabs(["首页", "组织架构", "公司档案", "名称口径", "归集规则", "导入问题池", "变更记录"])
+    with tabs[0]:
+        _render_base_settings_home()
+    with tabs[1]:
+        _render_base_settings_org()
+    with tabs[2]:
+        _render_base_settings_company_profile()
+    with tabs[3]:
+        _render_base_settings_naming()
+    with tabs[4]:
+        _render_base_settings_collection_rules()
+    with tabs[5]:
+        _render_base_settings_import_issues()
+    with tabs[6]:
+        _render_base_settings_change_log()
+
+
 def render_consolidated():
     st.markdown('<div class="page-header">🏢 合并报表</div>', unsafe_allow_html=True)
     report_type = st.selectbox("报表类型", ["资产负债表", "损益表"])
@@ -6327,6 +6654,7 @@ def main():
         "盈亏平衡测算": render_break_even_calculator,
         "合并报表": render_consolidated,
         "多期对比": render_multi_period,
+        "基础设置": render_base_settings,
         "公司层级": render_company_hierarchy,
         "系统管理": render_admin,
     }

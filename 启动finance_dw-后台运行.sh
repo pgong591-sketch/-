@@ -3,9 +3,9 @@ set -e
 
 cd "$(dirname "$0")"
 
-PID_FILE="data/streamlit_desktop.pid"
+PID_FILE="data/streamlit_desktop_8502.pid"
 LOG_FILE="data/streamlit_desktop.log"
-URL="http://localhost:8501"
+URL="http://localhost:8502"
 
 mkdir -p data
 
@@ -24,7 +24,7 @@ fi
 source .venv/bin/activate
 pip install -r requirements.txt
 
-nohup streamlit run app.py > "$LOG_FILE" 2>&1 &
+nohup streamlit run app.py --server.port 8502 --server.headless true > "$LOG_FILE" 2>&1 &
 echo $! > "$PID_FILE"
 
 sleep 2
