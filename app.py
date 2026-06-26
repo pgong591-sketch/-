@@ -121,9 +121,18 @@ PAGE_CSS = """
     }
 
     .main > .block-container {
-        padding: 1.15rem 1.65rem 2rem;
-        max-width: 1680px;
+        padding: 0.95rem 2rem 2rem !important;
+        max-width: none;
+        width: 100% !important;
         min-height: calc(100vh - 1rem);
+    }
+
+    [data-testid="stMainBlockContainer"],
+    [data-testid="stAppViewBlockContainer"] {
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+        max-width: none !important;
+        width: 100% !important;
     }
 
     #MainMenu { visibility: hidden; }
@@ -147,8 +156,9 @@ PAGE_CSS = """
     section[data-testid="stSidebar"] {
         background: var(--surface-soft);
         border-right: 1px solid var(--border-soft);
-        width: 18.75rem !important;
-        min-width: 18.75rem !important;
+        width: 12.6rem !important;
+        min-width: 12.6rem !important;
+        max-width: 12.6rem !important;
     }
 
     section[data-testid="stSidebar"] > div {
@@ -333,21 +343,27 @@ PAGE_CSS = """
         box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
     }
 
-    .workspace-filter-shell {
+    [class*="_filter_card"][data-testid="stVerticalBlockBorderWrapper"],
+    [class*="_filter_card"] [data-testid="stVerticalBlockBorderWrapper"] {
         background: #ffffff;
-        border: 1px solid #d9e2ef;
+        border: 1px solid var(--border-soft);
         border-radius: 8px;
-        padding: 0.7rem 0.78rem 0.62rem;
+        padding: 0.95rem 1rem 0.85rem;
         margin-bottom: 0.85rem;
-        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.035);
+        box-shadow: none;
+    }
+
+    [class*="_filter_card"][data-testid="stVerticalBlock"],
+    [class*="_filter_card"] [data-testid="stVerticalBlock"] {
+        gap: 0.5rem;
     }
 
     .workspace-filter-summary {
         color: #5b6b82;
         font-size: 0.76rem;
         font-weight: 650;
-        margin-top: -0.25rem;
-        margin-bottom: 0.45rem;
+        margin-top: -0.18rem;
+        margin-bottom: 0;
     }
 
     [class*="_period_quick_pills"] div[role="radiogroup"],
@@ -379,10 +395,10 @@ PAGE_CSS = """
     }
 
     .home-filter-title {
-        font-size: 0.82rem;
+        font-size: 0.86rem;
         color: #17345f;
-        font-weight: 700;
-        margin-bottom: 0.45rem;
+        font-weight: 800;
+        margin-bottom: 0.05rem;
         display: flex;
         align-items: center;
         gap: 0.45rem;
@@ -411,10 +427,16 @@ PAGE_CSS = """
         color: #42526a;
         font-size: 0.76rem;
         font-weight: 650;
-        padding-top: 0.32rem;
+        padding-top: 0.38rem;
         white-space: nowrap;
         display: inline-block;
-        min-width: 5.4rem;
+        min-width: 3.05rem;
+    }
+
+    [class*="_filter_year_pills"],
+    [class*="_filter_month_pills"],
+    [class*="_filter_group_pills"] {
+        margin-left: -3.1rem !important;
     }
 
     [class*="_filter_year_pills"] [data-testid^="stBaseButton"] p,
@@ -486,11 +508,12 @@ PAGE_CSS = """
     [class*="_filter_apply"] button,
     [class*="_filter_reset"] button,
     [class*="_filter_toggle"] button {
-        min-height: 1.92rem !important;
-        border-radius: 8px !important;
+        min-height: 2.02rem !important;
+        border-radius: 7px !important;
         font-weight: 650 !important;
-        padding: 0.16rem 0.42rem !important;
+        padding: 0.1rem 0.5rem !important;
         font-size: 0.76rem !important;
+        margin-top: 1.8rem !important;
     }
 
     [class*="_filter_apply"] button {
@@ -499,7 +522,7 @@ PAGE_CSS = """
     }
 
     [class*="_company_units"] [data-baseweb="select"] {
-        min-height: 2.18rem !important;
+        min-height: 2.02rem !important;
     }
 
     [class*="_company_units"] [data-baseweb="tag"] {
@@ -964,52 +987,179 @@ PAGE_CSS = """
     }
 
     section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #082b56 0%, #062144 100%) !important;
-        border-right: 1px solid rgba(255,255,255,0.08) !important;
+        background: linear-gradient(180deg, #0B2342 0%, #081B33 100%) !important;
+        border-right: 1px solid rgba(255,255,255,0.10) !important;
+        width: 12.6rem !important;
+        min-width: 12.6rem !important;
+        max-width: 12.6rem !important;
     }
 
-    .sidebar-brand,
-    .app-title,
-    .app-subtitle,
-    .nav-section-title,
-    .nav-module-caption,
-    .quick-filter-label {
-        color: #eaf2ff !important;
+    section[data-testid="stSidebar"] > div {
+        padding: 0.7rem 0.68rem 1rem !important;
     }
 
-    .app-subtitle,
-    .nav-section-title,
-    .nav-module-caption {
-        color: rgba(234,242,255,0.68) !important;
+    section[data-testid="stSidebar"] hr {
+        border-top: 1px solid rgba(255,255,255,0.16) !important;
+        margin: 0.62rem 0 0.72rem !important;
     }
 
-    .nav-current-module {
-        background: rgba(255,255,255,0.08) !important;
-        border-color: rgba(255,255,255,0.12) !important;
-        color: #ffffff !important;
+    .sidebar-brand {
+        padding: 0.08rem 0.16rem 0.45rem !important;
+    }
+
+    .app-title {
+        color: #f8fafc !important;
+        font-size: 1.36rem !important;
+        line-height: 1.18 !important;
+        font-weight: 780 !important;
+        text-align: left !important;
+    }
+
+    .app-subtitle {
+        color: #b6c2d6 !important;
+        font-size: 0.82rem !important;
+        line-height: 1.25 !important;
+        padding-top: 0.28rem !important;
+        text-align: left !important;
+    }
+
+    .nav-section-title {
+        color: #94a3b8 !important;
+        font-size: 0.74rem !important;
+        font-weight: 650 !important;
+        letter-spacing: 0.02em !important;
+        text-transform: none !important;
+        margin: 0.82rem 0 0.34rem !important;
+        padding: 0 0.25rem 0 1.15rem !important;
+        text-align: left !important;
+    }
+
+    .nav-section-title::before {
+        content: "";
+        display: inline-block;
+        width: 0.28rem;
+        height: 0.28rem;
+        margin-right: 0.42rem;
+        border-radius: 999px;
+        background: rgba(96,165,250,0.75);
+        vertical-align: 0.08rem;
+    }
+
+    section[data-testid="stSidebar"] div.stButton {
+        margin-bottom: 0.18rem !important;
     }
 
     section[data-testid="stSidebar"] div.stButton > button {
+        position: relative !important;
+        width: 100% !important;
+        min-height: 1.92rem !important;
+        padding: 0.22rem 0.52rem !important;
+        border-radius: 7px !important;
+        border: 1px solid transparent !important;
         background: transparent !important;
-        border-color: transparent !important;
-        color: rgba(234,242,255,0.86) !important;
+        box-shadow: none !important;
+        color: #cbd5e1 !important;
+        font-size: 0.82rem !important;
+        font-weight: 520 !important;
+        justify-content: flex-start !important;
+        overflow: hidden !important;
     }
 
     section[data-testid="stSidebar"] div.stButton > button:hover {
+        background: rgba(255,255,255,0.06) !important;
+        border-color: transparent !important;
+        color: #f8fafc !important;
+    }
+
+    section[data-testid="stSidebar"] div.stButton > button p,
+    section[data-testid="stSidebar"] div.stButton > button > div,
+    section[data-testid="stSidebar"] div.stButton > button span,
+    section[data-testid="stSidebar"] div.stButton > button [data-testid="stMarkdownContainer"] {
+        width: 100% !important;
+        text-align: left !important;
+    }
+
+    [class*="st-key-nav_module_toggle_"] button {
+        min-height: 3.42rem !important;
+        margin-top: 0.6rem !important;
+        padding: 0.52rem 0.64rem !important;
+        color: #e5eaf3 !important;
+        font-size: 1.02rem !important;
+        font-weight: 760 !important;
+        border-radius: 12px !important;
+        background: rgba(255,255,255,0.05) !important;
+        border-color: rgba(255,255,255,0.08) !important;
+        letter-spacing: 0 !important;
+    }
+
+    [class*="st-key-nav_module_toggle_"] button:hover {
         background: rgba(255,255,255,0.08) !important;
         color: #ffffff !important;
     }
 
-    section[data-testid="stSidebar"] div.stButton > button[kind="primary"] {
-        background: #1268d8 !important;
-        border-color: #1268d8 !important;
-        color: #ffffff !important;
+    [class*="st-key-nav_module_toggle_"] button p {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        gap: 0.5rem !important;
+        width: 100% !important;
+        white-space: nowrap !important;
+    }
+
+    [class*="st-key-nav_module_toggle_"] button[kind="primary"] {
+        background: rgba(37,99,235,0.14) !important;
+        border-color: rgba(96,165,250,0.28) !important;
+        color: #f8fafc !important;
+    }
+
+    [class*="st-key-nav_module_toggle_"] button[kind="primary"]::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0.42rem;
+        bottom: 0.42rem;
+        width: 3px;
+        border-radius: 999px;
+        background: #60a5fa;
+        opacity: 0.8;
+    }
+
+    [class*="st-key-nav_"]:not([class*="st-key-nav_module_toggle_"]) button {
+        min-height: 2.15rem !important;
+        margin: 0.12rem 0 0.12rem 0.82rem !important;
+        padding: 0.28rem 0.52rem 0.28rem 0.78rem !important;
+        color: #cbd5e1 !important;
+        font-size: 0.86rem !important;
+        font-weight: 520 !important;
+        border-radius: 9px !important;
+    }
+
+    [class*="st-key-nav_"]:not([class*="st-key-nav_module_toggle_"]) button[kind="primary"] {
+        background: rgba(59,130,246,0.18) !important;
+        border-color: transparent !important;
+        color: #bfdbfe !important;
+        font-weight: 650 !important;
+    }
+
+    [class*="st-key-nav_"]:not([class*="st-key-nav_module_toggle_"]) button[kind="primary"]::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0.36rem;
+        bottom: 0.36rem;
+        width: 3px;
+        border-radius: 999px;
+        background: #60a5fa;
     }
 
     .sidebar-note {
-        background: rgba(255,255,255,0.08) !important;
+        margin-top: 0.9rem !important;
+        padding: 0.62rem 0.7rem !important;
+        background: rgba(255,255,255,0.06) !important;
         border-color: rgba(255,255,255,0.12) !important;
-        color: rgba(234,242,255,0.76) !important;
+        color: rgba(203,213,225,0.78) !important;
+        font-size: 0.74rem !important;
+        line-height: 1.35 !important;
     }
 
     .bi-section-grid {
@@ -1602,7 +1752,7 @@ NAV_MODULE_SECTIONS = {
         "报表处理": ["核算记录"],
     },
     "基础设置": {
-        "主数据与口径": ["基础设置"],
+        "组织与系统": ["公司层级", "系统管理"],
     },
 }
 
@@ -1617,7 +1767,7 @@ NAV_LABELS = {
     "核算记录": "核算记录",
     "多维图片简报": "图片简报",
     "贡献式利润表": "贡献式利润表",
-    "多维损益表": "损益表",
+    "多维损益表": "管理损益表",
     "多维经营汇总表": "经营汇总表",
     "利润表总览驾驶舱": "利润驾驶舱",
     "利润表明细（原表）": "经营汇总表",
@@ -1643,8 +1793,6 @@ def _sidebar_page_module_map(module_sections: dict[str, dict[str, list[str]]] | 
 
 def _normalize_sidebar_page(current: str | None) -> str:
     page = str(current or "首页")
-    if page in {"公司层级", "系统管理"}:
-        return "基础设置"
     return page if page in _sidebar_page_module_map() else "首页"
 
 
@@ -1683,32 +1831,37 @@ def render_sidebar():
             st.session_state.nav_choice = current
         page_module = _sidebar_page_module_map(module_sections)
         active_module = page_module.get(current, next(iter(module_sections)))
-        expanded_modules = _sidebar_expanded_state(
-            current,
-            st.session_state.get("sidebar_expanded_modules"),
-            module_sections,
-        )
-        st.session_state["sidebar_expanded_modules"] = expanded_modules
+        open_key = "nav_open_modules"
+        if open_key not in st.session_state:
+            st.session_state[open_key] = [active_module]
+        open_modules = [
+            module for module in st.session_state.get(open_key, [])
+            if module in module_sections
+        ]
+        st.session_state[open_key] = open_modules
         st.session_state.nav_module = active_module
 
         for module_name, sections in module_sections.items():
             is_active_module = module_name == active_module
-            is_expanded = bool(st.session_state["sidebar_expanded_modules"].get(module_name, is_active_module))
+            is_expanded = module_name in st.session_state[open_key]
             arrow = "▾" if is_expanded else "▸"
-            button_type = "primary" if is_active_module else "secondary"
+            module_icons = {"经营中心": "📊", "数据中心": "🗂", "财务中心": "💰", "基础设置": "⚙"}
+            button_type = "primary" if (is_active_module or is_expanded) else "secondary"
             if st.button(
-                f"{module_name}{arrow}",
+                f"{module_icons.get(module_name, '▪')}  {module_name}  {arrow}",
                 key=f"nav_module_toggle_{module_name}",
                 type=button_type,
                 use_container_width=True,
             ):
-                st.session_state["sidebar_expanded_modules"] = _toggle_sidebar_module(
-                    st.session_state["sidebar_expanded_modules"],
-                    module_name,
-                )
+                open_set = set(st.session_state[open_key])
+                if module_name in open_set:
+                    open_set.remove(module_name)
+                else:
+                    open_set.add(module_name)
+                st.session_state[open_key] = [item for item in module_sections if item in open_set]
                 st.rerun()
 
-            if not st.session_state["sidebar_expanded_modules"].get(module_name, is_active_module):
+            if module_name not in st.session_state[open_key]:
                 continue
 
             for section, items in sections.items():
@@ -1718,11 +1871,6 @@ def render_sidebar():
                     if st.button(labels[item], key=f"nav_{item}", type=item_type, use_container_width=True):
                         st.session_state.nav_choice = item
                         st.session_state.nav_module = page_module.get(item, module_name)
-                        st.session_state["sidebar_expanded_modules"] = _sidebar_expanded_state(
-                            item,
-                            st.session_state["sidebar_expanded_modules"],
-                            module_sections,
-                        )
                         st.rerun()
 
         st.markdown('<div class="sidebar-note">本地数据仓库 · SQLite</div>', unsafe_allow_html=True)
@@ -2142,12 +2290,7 @@ def _render_company_unit_picker(
         format_func=lambda code: company_label_map.get(str(code), str(code)),
         placeholder="搜索公司编码或名称",
     )
-    selected_companies = [str(code) for code in st.session_state.get(company_key, []) if str(code)]
-    st.markdown(
-        f'<div class="workspace-filter-summary">{_html(_company_unit_summary(selected_companies, business_group))}</div>',
-        unsafe_allow_html=True,
-    )
-    return selected_companies
+    return [str(code) for code in st.session_state.get(company_key, []) if str(code)]
 
 
 def _render_more_filter_panel(
@@ -2206,6 +2349,7 @@ def _render_workspace_filter_bar(
     period_label: str = "统计周期",
     period_mode: str = "single",
     show_budget: bool = False,
+    show_period_quick: bool = False,
     note: str | None = None,
 ) -> dict:
     if not periods:
@@ -2239,8 +2383,6 @@ def _render_workspace_filter_bar(
         st.session_state[month_key] = st.session_state[f"{key_prefix}_filter_month_pills"]
     if st.session_state.get(f"{key_prefix}_filter_group_pills") in group_options:
         st.session_state[group_key] = st.session_state[f"{key_prefix}_filter_group_pills"]
-    if st.session_state.get(f"{key_prefix}_summary_mode_pills") in summary_mode_options:
-        st.session_state[summary_key] = st.session_state[f"{key_prefix}_summary_mode_pills"]
 
     selected_year = st.session_state[year_key]
     selected_month = st.session_state[month_key]
@@ -2266,98 +2408,81 @@ def _render_workspace_filter_bar(
         if period_key not in st.session_state or st.session_state[period_key] not in filtered_periods:
             st.session_state[period_key] = default_period
 
-    st.markdown(f'<div class="home-filter-title">{_html(title)}</div>', unsafe_allow_html=True)
-    _render_period_button_group(key_prefix, periods, period_mode, filtered_periods, max_buttons=6)
-    if show_budget:
-        cols = st.columns([1.12, 0.78, 0.78, 1.18, 1.55, 0.48, 0.48, 0.62])
-        with cols[0]:
-            st.selectbox("预算方案", ["未设置预算"], key=f"{key_prefix}_budget")
-        with cols[1]:
-            st.selectbox("开始", filtered_periods, key=f"{key_prefix}_start_period")
-        with cols[2]:
-            st.selectbox("结束", filtered_periods, key=f"{key_prefix}_end_period")
-        summary_col = cols[3]
-        company_col = cols[4]
-        action_cols = cols[5:]
-    elif period_mode == "range":
-        cols = st.columns([0.82, 0.82, 1.18, 1.55, 0.48, 0.48, 0.62])
-        with cols[0]:
-            st.selectbox("开始", filtered_periods, key=f"{key_prefix}_start_period")
-        with cols[1]:
-            st.selectbox("结束", filtered_periods, key=f"{key_prefix}_end_period")
-        summary_col = cols[2]
-        company_col = cols[3]
-        action_cols = cols[4:]
-    else:
-        cols = st.columns([1.0, 1.18, 1.55, 0.48, 0.48, 0.62])
-        with cols[0]:
-            st.selectbox(period_label, filtered_periods, key=f"{key_prefix}_period")
-        summary_col = cols[1]
-        company_col = cols[2]
-        action_cols = cols[3:]
+    with st.container(border=True, key=f"{key_prefix}_filter_card"):
+        st.markdown(f'<div class="home-filter-title">{_html(title)}</div>', unsafe_allow_html=True)
+        if show_period_quick:
+            _render_period_button_group(key_prefix, periods, period_mode, filtered_periods, max_buttons=6)
+        if show_budget:
+            cols = st.columns([1.12, 0.78, 0.78, 1.55, 0.48, 0.48, 0.62])
+            with cols[0]:
+                st.selectbox("预算方案", ["未设置预算"], key=f"{key_prefix}_budget")
+            with cols[1]:
+                st.selectbox("开始", filtered_periods, key=f"{key_prefix}_start_period")
+            with cols[2]:
+                st.selectbox("结束", filtered_periods, key=f"{key_prefix}_end_period")
+            company_col = cols[3]
+            action_cols = cols[4:]
+        elif period_mode == "range":
+            cols = st.columns([0.82, 0.82, 1.55, 0.48, 0.48, 0.62])
+            with cols[0]:
+                st.selectbox("开始", filtered_periods, key=f"{key_prefix}_start_period")
+            with cols[1]:
+                st.selectbox("结束", filtered_periods, key=f"{key_prefix}_end_period")
+            company_col = cols[2]
+            action_cols = cols[3:]
+        else:
+            cols = st.columns([1.0, 1.55, 0.48, 0.48, 0.62])
+            with cols[0]:
+                st.selectbox(period_label, filtered_periods, key=f"{key_prefix}_period")
+            company_col = cols[1]
+            action_cols = cols[2:]
 
-    with summary_col:
-        summary_mode_pick = st.pills(
-            "经营口径",
-            summary_mode_options,
-            selection_mode="single",
-            default=st.session_state[summary_key],
-            key=f"{key_prefix}_summary_mode_pills",
-            width="stretch",
-        )
-        st.session_state[summary_key] = (
-            summary_mode_pick if summary_mode_pick in summary_mode_options else summary_mode_options[0]
-        )
+        with company_col:
+            selected_companies = _render_company_unit_picker(
+                key_prefix,
+                st.session_state[group_key],
+                company_key,
+                company_options_df,
+            )
 
-    with company_col:
-        selected_companies = _render_company_unit_picker(
-            key_prefix,
-            st.session_state[group_key],
-            company_key,
-            company_options_df,
-        )
+        with action_cols[0]:
+            st.button(
+                "查询",
+                key=f"{key_prefix}_filter_apply",
+                type="primary",
+                icon=":material/search:",
+                use_container_width=True,
+            )
+        with action_cols[1]:
+            st.button(
+                "重置",
+                key=f"{key_prefix}_filter_reset",
+                on_click=_reset_workspace_filters,
+                args=(key_prefix, periods[0], summary_mode_options[0], period_mode),
+                icon=":material/restart_alt:",
+                use_container_width=True,
+            )
+        with action_cols[2]:
+            st.button(
+                "收起筛选" if st.session_state[expanded_key] else "更多筛选",
+                key=f"{key_prefix}_filter_toggle",
+                on_click=_toggle_workspace_filter_expanded,
+                args=(key_prefix,),
+                icon=":material/tune:",
+                use_container_width=True,
+            )
 
-    with action_cols[0]:
-        st.markdown('<div style="height:1.08rem;"></div>', unsafe_allow_html=True)
-        st.button(
-            "查询",
-            key=f"{key_prefix}_filter_apply",
-            type="primary",
-            icon=":material/search:",
-            use_container_width=True,
-        )
-    with action_cols[1]:
-        st.markdown('<div style="height:1.08rem;"></div>', unsafe_allow_html=True)
-        st.button(
-            "重置",
-            key=f"{key_prefix}_filter_reset",
-            on_click=_reset_workspace_filters,
-            args=(key_prefix, periods[0], summary_mode_options[0], period_mode),
-            icon=":material/restart_alt:",
-            use_container_width=True,
-        )
-    with action_cols[2]:
-        st.markdown('<div style="height:1.08rem;"></div>', unsafe_allow_html=True)
-        st.button(
-            "收起筛选" if st.session_state[expanded_key] else "更多筛选",
-            key=f"{key_prefix}_filter_toggle",
-            on_click=_toggle_workspace_filter_expanded,
-            args=(key_prefix,),
-            icon=":material/tune:",
-            use_container_width=True,
-        )
-
-    if st.session_state[expanded_key]:
-        _render_more_filter_panel(
-            key_prefix,
-            year_options,
-            month_options,
-            group_options,
-            year_key,
-            month_key,
-            group_key,
-            note,
-        )
+        if st.session_state[expanded_key]:
+            _render_more_filter_panel(
+                key_prefix,
+                year_options,
+                month_options,
+                group_options,
+                year_key,
+                month_key,
+                group_key,
+                note,
+            )
     result = {
         "summary_mode": st.session_state[summary_key],
         "business_group": st.session_state[group_key],
@@ -2428,7 +2553,7 @@ def _render_filter_pills_row(
     if widget_key not in st.session_state:
         st.session_state[widget_key] = current_value
 
-    label_col, pills_col = st.columns([1.7, 16], gap="small")
+    label_col, pills_col = st.columns([1.05, 16.65], gap="small")
     with label_col:
         st.markdown(f'<div class="quick-filter-label">{_html(label)}：</div>', unsafe_allow_html=True)
     with pills_col:
@@ -4077,7 +4202,7 @@ def _operating_design_css() -> str:
       .profit-original-meta-sub span{display:inline-flex;align-items:center;margin-right:14px;white-space:nowrap;}
       .profit-original-card{
         background:var(--card-bg);border:1px solid var(--border);border-radius:8px;
-        overflow:hidden;box-shadow:0 10px 24px rgba(16,35,63,.045);
+        overflow:visible;box-shadow:0 10px 24px rgba(16,35,63,.045);
       }
       .profit-original-card-head{
         display:flex;align-items:center;justify-content:space-between;gap:12px;
@@ -4085,10 +4210,10 @@ def _operating_design_css() -> str:
       }
       .profit-original-card-title{font-size:15px;font-weight:800;color:var(--text-main);}
       .profit-original-card-tip{font-size:12px;color:var(--text-secondary);}
-      .profit-original-table-scroll{max-height:560px;overflow:auto;background:#fff;}
-      .profit-original-table{width:100%;min-width:1220px;border-collapse:separate;border-spacing:0;font-size:13px;table-layout:fixed;}
+      .profit-original-table-scroll{max-height:none;overflow:visible;background:#fff;}
+      .profit-original-table{width:100%;min-width:0;border-collapse:separate;border-spacing:0;font-size:13px;table-layout:fixed;}
       .profit-original-table th{
-        position:sticky;top:0;z-index:5;height:44px;background:var(--table-header-bg);
+        height:44px;background:var(--table-header-bg);
         color:var(--text-main);font-size:13px;font-weight:700;text-align:center;
         border-right:1px solid var(--border);border-bottom:1px solid var(--border);
         padding:0 10px;white-space:nowrap;
@@ -4099,7 +4224,7 @@ def _operating_design_css() -> str:
         color:var(--text-main);font-variant-numeric:tabular-nums;
       }
       .profit-original-table th:first-child,.profit-original-table td:first-child{
-        position:sticky;left:0;z-index:6;text-align:left;border-left:1px solid var(--border);
+        text-align:center;border-left:1px solid var(--border);
       }
       .profit-original-table td:first-child{background:#fff;font-weight:700;}
       .profit-original-table tr:nth-child(even) td{background:#fbfdff;}
@@ -4348,8 +4473,9 @@ def _render_operating_original_design(
 {empty_html}
 <table class="profit-original-table">
 <colgroup>
-<col style="width:220px"><col style="width:160px"><col style="width:120px">
-<col style="width:120px"><col style="width:160px"><col style="width:140px"><col style="width:360px">
+<col style="width:18%"><col style="width:13%"><col style="width:10%">
+<col style="width:10%"><col style="width:14%"><col style="width:10%">
+<col style="width:25%">
 </colgroup>
 <thead>
 <tr>

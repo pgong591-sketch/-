@@ -5,8 +5,9 @@ import app
 
 def test_sidebar_has_four_top_level_modules_and_base_settings_entry():
     assert list(app.NAV_MODULE_SECTIONS) == ["经营中心", "数据中心", "财务中心", "基础设置"]
-    assert app.NAV_MODULE_SECTIONS["基础设置"] == {"主数据与口径": ["基础设置"]}
-    assert app._sidebar_page_module_map()["基础设置"] == "基础设置"
+    assert app.NAV_MODULE_SECTIONS["基础设置"] == {"组织与系统": ["公司层级", "系统管理"]}
+    assert app._sidebar_page_module_map()["公司层级"] == "基础设置"
+    assert app._sidebar_page_module_map()["系统管理"] == "基础设置"
 
 
 def test_sidebar_expanded_state_keeps_multiple_modules_open():
@@ -32,7 +33,7 @@ def test_sidebar_toggle_only_changes_one_module():
 
 
 def test_sidebar_current_page_defaults_its_module_open():
-    expanded = app._sidebar_expanded_state("基础设置", {})
+    expanded = app._sidebar_expanded_state("公司层级", {})
 
     assert expanded["基础设置"] is True
     assert expanded["经营中心"] is False
@@ -43,5 +44,5 @@ def test_sidebar_render_uses_buttons_not_single_select_pills():
 
     assert "st.pills" not in source
     assert "nav_module_toggle_" in source
-    assert 'button_type = "primary" if is_active_module else "secondary"' in source
+    assert 'button_type = "primary" if (is_active_module or is_expanded) else "secondary"' in source
     assert 'item_type = "primary" if current == item else "secondary"' in source
