@@ -68,8 +68,12 @@ from src.account_standardization import (
     upsert_standard_account,
 )
 from src.base_settings_service import (
+    COMPANY_HIERARCHY_ROOT_CODE,
+    build_company_hierarchy_graph_data,
+    detect_company_hierarchy_issues,
     get_base_health_checks,
     get_base_settings_overview,
+    get_default_expanded_company_codes,
     resolve_company_identity,
 )
 
@@ -6308,9 +6312,308 @@ def _render_base_settings_home():
         st.info("暂无基础数据体检结果。")
 
 
+def _company_hierarchy_chart_css() -> str:
+    return """
+    <style>
+      .base-hierarchy-chart-note{
+        margin:.4rem 0 .7rem;padding:.65rem .8rem;border:1px solid #bfdbfe;
+        background:#eff6ff;border-radius:8px;color:#1e3a8a;font-size:.82rem;font-weight:650;
+      }
+      .base-hierarchy-legend{
+        display:flex;flex-wrap:wrap;gap:.45rem .6rem;margin:.6rem 0 .9rem;
+        color:#475569;font-size:.78rem;
+      }
+      .base-hierarchy-legend span{
+        display:inline-flex;align-items:center;gap:.25rem;border:1px solid #dbe3ef;
+        background:#fff;border-radius:999px;padding:.2rem .5rem;white-space:nowrap;
+      }
+      .base-company-node{
+        margin:.13rem 0;padding:.58rem .68rem;border:1px solid #d8e2ef;border-radius:8px;
+        background:#fff;box-shadow:0 1px 3px rgba(15,23,42,.04);
+      }
+      .base-company-node.root{background:#0b2342;border-color:#0b2342;color:#fff;}
+      .base-company-node.inactive{background:#f8fafc;color:#64748b;border-style:dashed;}
+      .base-company-node.issue{border-color:#f59e0b;background:#fffbeb;}
+      .base-company-node-title{font-weight:800;font-size:.9rem;line-height:1.25;}
+      .base-company-node-code{margin-top:.18rem;color:#64748b;font-size:.74rem;font-weight:700;}
+      .base-company-node.root .base-company-node-code{color:#cbd5e1;}
+      .base-company-node-tags{margin-top:.36rem;display:flex;gap:.28rem;flex-wrap:wrap;}
+      .base-company-node-tag{
+        display:inline-flex;align-items:center;height:20px;padding:0 .42rem;border-radius:999px;
+        background:#eef6ff;color:#1d4ed8;border:1px solid #bfdbfe;font-size:.68rem;font-weight:800;
+      }
+      .base-company-node-tag.off{background:#f1f5f9;color:#64748b;border-color:#cbd5e1;}
+      .base-company-node-tag.warn{background:#fff7ed;color:#c2410c;border-color:#fed7aa;}
+      .base-company-node-wrap{border-left:1px solid #e2e8f0;padding-left:.55rem;}
+    </style>
+    """
+
+
+def render_company_node_card(
+    node: dict,
+    *,
+    depth: int,
+    show_code: bool,
+    show_consolidated: bool,
+) -> str:
+    classes = ["base-company-node"]
+    if node.get("is_root"):
+        classes.append("root")
+    if node.get("status") == 0:
+        classes.append("inactive")
+    if node.get("issue_flags"):
+        classes.append("issue")
+    tags = []
+    if node.get("is_root"):
+        tags.append('<span class="base-company-node-tag">ROOT 节点</span>')
+    if node.get("status") == 0:
+        tags.append('<span class="base-company-node-tag off">停用</span>')
+    if show_consolidated and node.get("is_consolidated") == 1 and not node.get("is_root"):
+        tags.append('<span class="base-company-node-tag">合并</span>')
+    if node.get("issue_flags"):
+        tags.append(f'<span class="base-company-node-tag warn">{_html(node.get("issue_label") or "异常")}</span>')
+    code_html = f'<div class="base-company-node-code">{_html(node.get("code"))}</div>' if show_code else ""
+    return f"""
+    <div class="base-company-node-wrap" style="margin-left:{max(depth, 0) * 1.25}rem;">
+      <div class="{' '.join(classes)}">
+        <div class="base-company-node-title">{_html(node.get("display_name") or node.get("name") or node.get("code"))}</div>
+        {code_html}
+        <div class="base-company-node-tags">{''.join(tags)}</div>
+      </div>
+    </div>
+    """
+
+
+def render_company_node_detail_panel(node: dict | None, issues: list[dict]) -> None:
+    st.markdown("##### 节点信息")
+    if not node:
+        st.info("选择一个节点查看公司信息。")
+        return
+    related_issues = [item for item in issues if item.get("company_code") == node.get("code")]
+    detail_rows = [
+        ("公司名称", node.get("name")),
+        ("公司简称", node.get("short_name")),
+        ("公司编码", node.get("code")),
+        ("上级公司", node.get("parent_code") or "ROOT"),
+        ("公司层级", node.get("level")),
+        ("合并范围", node.get("consolidated_label")),
+        ("公司状态", node.get("status_label")),
+        ("是否末级", "是" if int(node.get("is_leaf") or 0) == 1 else "否"),
+        ("树路径", node.get("tree_path")),
+        ("备注", "；".join(item.get("detail", "") for item in related_issues) if related_issues else "无"),
+    ]
+    st.dataframe(
+        pd.DataFrame(detail_rows, columns=["字段", "内容"]),
+        use_container_width=True,
+        hide_index=True,
+        height=360,
+    )
+
+
+def _company_hierarchy_status_visible(node: dict, status_filter: str) -> bool:
+    if node.get("is_root") or status_filter == "全部":
+        return True
+    if status_filter == "启用":
+        return int(node.get("status") or 0) != 0
+    if status_filter == "停用":
+        return int(node.get("status") or 0) == 0
+    return True
+
+
+def _render_company_hierarchy_node(
+    code: str,
+    *,
+    depth: int,
+    graph_data: dict,
+    expanded_codes: set[str],
+    selected_key: str,
+    expanded_key: str,
+    depth_limit: int | None,
+    status_filter: str,
+    show_code: bool,
+    show_consolidated: bool,
+    visited: set[str],
+) -> None:
+    if code in visited:
+        return
+    if depth_limit is not None and depth > depth_limit:
+        return
+    visited.add(code)
+    nodes = graph_data.get("nodes", {})
+    children_map = graph_data.get("children_map", {})
+    node = nodes.get(code)
+    if not node:
+        return
+
+    children = children_map.get(code, [])
+    has_children = bool(children)
+    visible = _company_hierarchy_status_visible(node, status_filter)
+    if visible:
+        toggle_col, card_col, action_col = st.columns([0.5, 7.5, 1.1])
+        with toggle_col:
+            if has_children:
+                toggle_label = "-" if code in expanded_codes else "+"
+                if st.button(toggle_label, key=f"base_hierarchy_toggle_{code}", help="+ 可展开，- 已展开"):
+                    current = set(st.session_state.get(expanded_key, []))
+                    if code in current:
+                        current.remove(code)
+                    else:
+                        current.add(code)
+                    st.session_state[expanded_key] = sorted(current)
+                    st.rerun()
+            else:
+                st.markdown("&nbsp;", unsafe_allow_html=True)
+        with card_col:
+            st.markdown(
+                render_company_node_card(
+                    node,
+                    depth=depth,
+                    show_code=show_code,
+                    show_consolidated=show_consolidated,
+                ),
+                unsafe_allow_html=True,
+            )
+        with action_col:
+            if st.button("查看", key=f"base_hierarchy_select_{code}", use_container_width=True):
+                st.session_state[selected_key] = code
+                st.rerun()
+
+    if code in expanded_codes:
+        for child_code in children:
+            _render_company_hierarchy_node(
+                child_code,
+                depth=depth + 1,
+                graph_data=graph_data,
+                expanded_codes=expanded_codes,
+                selected_key=selected_key,
+                expanded_key=expanded_key,
+                depth_limit=depth_limit,
+                status_filter=status_filter,
+                show_code=show_code,
+                show_consolidated=show_consolidated,
+                visited=visited,
+            )
+
+
+def render_company_hierarchy_structure_chart() -> None:
+    st.markdown(_company_hierarchy_chart_css(), unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div class="base-hierarchy-chart-note">
+        结构图展示的是 companies.parent_code 形成的公司上下级关系。业务模块归属请到“公司档案”维护，调整业务模块不要修改公司上级。
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    graph_data = build_company_hierarchy_graph_data()
+    root_code = graph_data.get("root_code", COMPANY_HIERARCHY_ROOT_CODE)
+    nodes = graph_data.get("nodes", {})
+    children_map = graph_data.get("children_map", {})
+    issues = graph_data.get("issues", [])
+
+    expanded_key = "base_company_hierarchy_expanded"
+    selected_key = "base_company_hierarchy_selected"
+    if expanded_key not in st.session_state:
+        st.session_state[expanded_key] = get_default_expanded_company_codes(graph_data=graph_data)
+    if selected_key not in st.session_state:
+        st.session_state[selected_key] = root_code
+
+    ctrl_cols = st.columns([1.05, 1.05, 1.1, 1.2, 0.9, 0.9, 0.9])
+    with ctrl_cols[0]:
+        depth_option = st.selectbox("显示层级", ["全部", "1级", "2级", "3级", "4级"], key="base_hierarchy_depth")
+    with ctrl_cols[1]:
+        status_filter = st.selectbox("公司状态", ["全部", "启用", "停用"], key="base_hierarchy_status")
+    with ctrl_cols[2]:
+        show_code = st.checkbox("显示公司编码", value=True, key="base_hierarchy_show_code")
+    with ctrl_cols[3]:
+        show_consolidated = st.checkbox("显示合并标记", value=True, key="base_hierarchy_show_consolidated")
+    with ctrl_cols[4]:
+        if st.button("全部展开", key="base_hierarchy_expand_all", use_container_width=True):
+            st.session_state[expanded_key] = sorted([code for code, children in children_map.items() if children])
+            st.rerun()
+    with ctrl_cols[5]:
+        if st.button("全部收起", key="base_hierarchy_collapse_all", use_container_width=True):
+            st.session_state[expanded_key] = [root_code]
+            st.rerun()
+    with ctrl_cols[6]:
+        if st.button("刷新", key="base_hierarchy_refresh", use_container_width=True):
+            st.session_state[expanded_key] = get_default_expanded_company_codes(graph_data=graph_data)
+            st.session_state[selected_key] = root_code
+            st.rerun()
+
+    st.markdown(
+        """
+        <div class="base-hierarchy-legend">
+          <span>ROOT 节点</span><span>启用公司</span><span>停用公司</span><span>合并范围公司</span>
+          <span>异常节点</span><span>+ 可展开</span><span>- 已展开</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if issues:
+        with st.expander(f"层级异常 {len(issues)} 条", expanded=False):
+            st.dataframe(pd.DataFrame(issues), use_container_width=True, hide_index=True, height=220)
+
+    depth_limit = None if depth_option == "全部" else int(depth_option.replace("级", ""))
+    expanded_codes = set(st.session_state.get(expanded_key, [root_code]))
+    selected_code = st.session_state.get(selected_key, root_code)
+    left_col, right_col = st.columns([3.2, 1.2])
+    with left_col:
+        if not children_map.get(root_code):
+            st.info("暂无公司层级数据。")
+        else:
+            _render_company_hierarchy_node(
+                root_code,
+                depth=0,
+                graph_data=graph_data,
+                expanded_codes=expanded_codes,
+                selected_key=selected_key,
+                expanded_key=expanded_key,
+                depth_limit=depth_limit,
+                status_filter=status_filter,
+                show_code=show_code,
+                show_consolidated=show_consolidated,
+                visited=set(),
+            )
+    with right_col:
+        render_company_node_detail_panel(nodes.get(selected_code), issues)
+
+
 def _render_base_settings_org():
     st.info("组织架构用于维护公司上下级、组织树和合并范围；不要用它调整经营分析业务模块。")
-    render_company_hierarchy()
+    tabs = st.tabs(["公司清单", "公司树", "结构图", "合并范围", "股权控制关系"])
+    with tabs[0]:
+        try:
+            tree = get_company_tree()
+            if len(tree):
+                st.dataframe(tree, use_container_width=True, hide_index=True, height=520)
+            else:
+                st.info("暂无公司清单。")
+        except Exception as exc:
+            st.error(f"公司清单加载失败: {exc}")
+    with tabs[1]:
+        render_company_hierarchy()
+    with tabs[2]:
+        render_company_hierarchy_structure_chart()
+    with tabs[3]:
+        try:
+            structure_df = get_company_structure_view()
+            if len(structure_df):
+                st.dataframe(structure_df, use_container_width=True, hide_index=True, height=520)
+            else:
+                st.info("暂无合并范围数据。")
+        except Exception as exc:
+            st.error(f"合并范围加载失败: {exc}")
+    with tabs[4]:
+        try:
+            ownership_df = get_ownership_grid()
+            if len(ownership_df):
+                st.dataframe(ownership_df, use_container_width=True, hide_index=True, height=520)
+            else:
+                st.info("暂无股权控制关系。")
+        except Exception as exc:
+            st.error(f"股权控制关系加载失败: {exc}")
 
 
 def _render_base_settings_company_profile():

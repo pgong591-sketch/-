@@ -25,6 +25,7 @@ from .operating_summary import SUMMARY_ITEM_ORDER
 
 ALL_COMPANIES_VALUE = ""
 BASE_OPERATING_ITEM_ALIASES = {"差旅交际费": "交际费"}
+COMPANY_HIERARCHY_ROOT_CODE = "__ROOT__"
 
 
 def _clean(value: Any) -> str:
@@ -268,6 +269,240 @@ def normalize_operating_item(value: Any) -> str:
     item = _clean(value)
     normalized = BASE_OPERATING_ITEM_ALIASES.get(item, item)
     return normalized if normalized in SUMMARY_ITEM_ORDER else normalized
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _company_hierarchy_rows() -> list[dict[str, Any]]:
+    rows = execute_sql(
+        """
+        SELECT
+            CAST(code AS TEXT) AS code,
+            COALESCE(name, '') AS name,
+            COALESCE(short_name, '') AS short_name,
+            COALESCE(parent_code, '') AS parent_code,
+            COALESCE(level, 0) AS level,
+            COALESCE(tree_path, '') AS tree_path,
+            COALESCE(is_leaf, 1) AS is_leaf,
+            COALESCE(is_consolidated, 1) AS is_consolidated,
+            COALESCE(status, 1) AS status
+        FROM companies
+        ORDER BY COALESCE(tree_path, ''), level, code
+        """
+    )
+    if rows.empty:
+        return []
+    return rows.to_dict("records")
+
+
+def _company_node(row: dict[str, Any]) -> dict[str, Any]:
+    code = _clean(row.get("code"))
+    name = _clean(row.get("name")) or code
+    short_name = _clean(row.get("short_name"))
+    parent_code = _clean(row.get("parent_code"))
+    status = _safe_int(row.get("status"), 1)
+    is_consolidated = _safe_int(row.get("is_consolidated"), 1)
+    is_leaf = _safe_int(row.get("is_leaf"), 1)
+    level = _safe_int(row.get("level"), 0)
+    return {
+        "code": code,
+        "name": name,
+        "short_name": short_name,
+        "display_name": short_name or name or code,
+        "parent_code": parent_code,
+        "level": level,
+        "tree_path": _clean(row.get("tree_path")),
+        "is_leaf": is_leaf,
+        "is_consolidated": is_consolidated,
+        "status": status,
+        "status_label": "停用" if status == 0 else "启用",
+        "consolidated_label": "合并" if is_consolidated == 1 else "非合并",
+        "is_root": False,
+        "issue_flags": [],
+        "issue_label": "",
+        "children_count": 0,
+    }
+
+
+def detect_company_hierarchy_issues(rows: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """Detect hierarchy issues without mutating company master data."""
+    source_rows = rows if rows is not None else _company_hierarchy_rows()
+    nodes = {_clean(row.get("code")): _company_node(row) for row in source_rows if _clean(row.get("code"))}
+    issues: list[dict[str, Any]] = []
+
+    for code, node in nodes.items():
+        parent_code = node["parent_code"]
+        if parent_code and parent_code not in nodes:
+            issues.append({
+                "company_code": code,
+                "company_name": node["name"],
+                "issue_type": "missing_parent",
+                "issue_label": "未挂接",
+                "detail": f"上级公司 {parent_code} 不存在",
+            })
+        if parent_code == code:
+            issues.append({
+                "company_code": code,
+                "company_name": node["name"],
+                "issue_type": "self_parent",
+                "issue_label": "异常",
+                "detail": "公司上级不能指向自身",
+            })
+        if not parent_code and node["level"] > 1:
+            issues.append({
+                "company_code": code,
+                "company_name": node["name"],
+                "issue_type": "detached_level",
+                "issue_label": "未挂接",
+                "detail": "非顶级公司缺少上级公司",
+            })
+        if parent_code in nodes and node["level"] <= nodes[parent_code]["level"]:
+            issues.append({
+                "company_code": code,
+                "company_name": node["name"],
+                "issue_type": "level_order",
+                "issue_label": "异常",
+                "detail": "公司层级不大于上级公司层级",
+            })
+        if parent_code and parent_code in nodes and parent_code not in node["tree_path"]:
+            issues.append({
+                "company_code": code,
+                "company_name": node["name"],
+                "issue_type": "tree_path_parent",
+                "issue_label": "异常",
+                "detail": "树路径未包含上级公司编码",
+            })
+
+    parent_map = {code: node["parent_code"] for code, node in nodes.items()}
+    cycle_codes: set[str] = set()
+    for code in nodes:
+        path: list[str] = []
+        seen: set[str] = set()
+        current = code
+        while current:
+            if current in seen:
+                cycle_start = path.index(current) if current in path else 0
+                cycle_codes.update(path[cycle_start:])
+                break
+            seen.add(current)
+            path.append(current)
+            parent = parent_map.get(current, "")
+            if not parent or parent not in nodes:
+                break
+            current = parent
+    for code in sorted(cycle_codes):
+        node = nodes[code]
+        issues.append({
+            "company_code": code,
+            "company_name": node["name"],
+            "issue_type": "cycle",
+            "issue_label": "异常",
+            "detail": "公司上下级存在循环引用",
+        })
+
+    return issues
+
+
+def build_company_hierarchy_graph_data() -> dict[str, Any]:
+    """Build read-only hierarchy graph data from companies.parent_code."""
+    rows = _company_hierarchy_rows()
+    root_node = {
+        "code": COMPANY_HIERARCHY_ROOT_CODE,
+        "name": "ROOT",
+        "short_name": "ROOT",
+        "display_name": "ROOT",
+        "parent_code": "",
+        "level": 0,
+        "tree_path": "",
+        "is_leaf": 0,
+        "is_consolidated": 1,
+        "status": 1,
+        "status_label": "启用",
+        "consolidated_label": "合并",
+        "is_root": True,
+        "issue_flags": [],
+        "issue_label": "",
+        "children_count": 0,
+    }
+    nodes: dict[str, dict[str, Any]] = {COMPANY_HIERARCHY_ROOT_CODE: root_node}
+    for row in rows:
+        node = _company_node(row)
+        if node["code"]:
+            nodes[node["code"]] = node
+
+    issues = detect_company_hierarchy_issues(rows)
+    issue_map: dict[str, list[dict[str, Any]]] = {}
+    for issue in issues:
+        issue_map.setdefault(issue["company_code"], []).append(issue)
+    for code, node_issues in issue_map.items():
+        if code not in nodes:
+            continue
+        nodes[code]["issue_flags"] = sorted({item["issue_type"] for item in node_issues})
+        labels = [item["issue_label"] for item in node_issues if item.get("issue_label")]
+        nodes[code]["issue_label"] = labels[0] if labels else "异常"
+
+    children_map: dict[str, list[str]] = {code: [] for code in nodes}
+    abnormal_parent_types = {"missing_parent", "self_parent", "cycle"}
+    for code, node in nodes.items():
+        if code == COMPANY_HIERARCHY_ROOT_CODE:
+            continue
+        issue_types = set(node.get("issue_flags", []))
+        parent_code = node["parent_code"]
+        if (
+            not parent_code
+            or parent_code not in nodes
+            or parent_code == code
+            or issue_types.intersection(abnormal_parent_types)
+        ):
+            parent_code = COMPANY_HIERARCHY_ROOT_CODE
+        children_map.setdefault(parent_code, []).append(code)
+
+    def sort_key(item_code: str) -> tuple[int, str, str]:
+        item = nodes[item_code]
+        return (_safe_int(item.get("level")), _clean(item.get("tree_path")), item_code)
+
+    for parent_code, child_codes in children_map.items():
+        children_map[parent_code] = sorted(child_codes, key=sort_key)
+    for code, node in nodes.items():
+        node["children_count"] = len(children_map.get(code, []))
+
+    return {
+        "root_code": COMPANY_HIERARCHY_ROOT_CODE,
+        "nodes": nodes,
+        "children_map": children_map,
+        "issues": issues,
+    }
+
+
+def get_company_hierarchy_children_map(graph_data: dict[str, Any] | None = None) -> dict[str, list[str]]:
+    """Return the read-only parent -> children map for the company hierarchy graph."""
+    data = graph_data if graph_data is not None else build_company_hierarchy_graph_data()
+    return {str(parent): list(children) for parent, children in data.get("children_map", {}).items()}
+
+
+def get_default_expanded_company_codes(max_depth: int = 2, graph_data: dict[str, Any] | None = None) -> list[str]:
+    """Return default expanded codes: ROOT and the first levels."""
+    data = graph_data if graph_data is not None else build_company_hierarchy_graph_data()
+    root_code = data.get("root_code", COMPANY_HIERARCHY_ROOT_CODE)
+    children_map = data.get("children_map", {})
+    expanded: list[str] = []
+    queue: list[tuple[str, int]] = [(root_code, 0)]
+    visited: set[str] = set()
+    while queue:
+        code, depth = queue.pop(0)
+        if code in visited:
+            continue
+        visited.add(code)
+        if depth <= max_depth:
+            expanded.append(code)
+            for child_code in children_map.get(code, []):
+                queue.append((child_code, depth + 1))
+    return expanded
 
 
 def _count_sql(sql: str, params: dict[str, Any] | None = None) -> int:
