@@ -2,12 +2,17 @@ import pandas as pd
 from sqlalchemy import text
 
 from src.base_settings_service import (
+    COMPANY_HIERARCHY_ROOT_CODE,
+    build_company_hierarchy_graph_data,
+    detect_company_hierarchy_issues,
     get_base_health_checks,
     get_base_settings_overview,
     get_business_group_options,
+    get_company_hierarchy_children_map,
     get_company_dimension,
     get_company_options,
     get_company_scope_codes,
+    get_default_expanded_company_codes,
     normalize_business_group,
     normalize_operating_item,
     record_import_issue,
@@ -194,3 +199,88 @@ def test_unresolved_company_count_is_pending_when_issue_type_column_missing():
 
     assert overview["import_issue_pool_available"] is True
     assert overview["unresolved_company_name_count"] is None
+
+
+def test_company_hierarchy_graph_builds_children_map_and_default_expansion():
+    _seed_company_master()
+
+    graph = build_company_hierarchy_graph_data()
+    children_map = get_company_hierarchy_children_map(graph)
+    expanded = get_default_expanded_company_codes(graph_data=graph)
+
+    assert graph["root_code"] == COMPANY_HIERARCHY_ROOT_CODE
+    assert COMPANY_HIERARCHY_ROOT_CODE in graph["nodes"]
+    assert children_map[COMPANY_HIERARCHY_ROOT_CODE] == ["101", "102"]
+    assert children_map["101"] == ["10101"]
+    assert children_map["10101"] == ["1010101"]
+    assert COMPANY_HIERARCHY_ROOT_CODE in expanded
+    assert "101" in expanded
+    assert "10101" in expanded
+
+
+def test_company_hierarchy_graph_marks_inactive_and_consolidated_nodes():
+    _seed_company_master()
+
+    graph = build_company_hierarchy_graph_data()
+
+    assert graph["nodes"]["102"]["status_label"] == "停用"
+    assert graph["nodes"]["102"]["status"] == 0
+    assert graph["nodes"]["101"]["is_consolidated"] == 1
+    assert graph["nodes"]["101"]["consolidated_label"] == "合并"
+
+
+def test_company_hierarchy_issues_detect_missing_parent_and_cycles_without_recursion():
+    _seed_company_master()
+    session = get_session()
+    try:
+        session.execute(text("""
+            INSERT OR REPLACE INTO companies
+                (code, name, short_name, parent_code, level, tree_path, is_consolidated, status)
+            VALUES
+                ('201', '缺失上级公司', '缺失上级', '999', 2, '/999/201', 1, 1),
+                ('301', '循环公司A', '循环A', '302', 2, '/301', 1, 1),
+                ('302', '循环公司B', '循环B', '301', 3, '/302', 1, 1)
+        """))
+        session.commit()
+    finally:
+        session.close()
+
+    issues = detect_company_hierarchy_issues()
+    graph = build_company_hierarchy_graph_data()
+    issue_types = {(item["company_code"], item["issue_type"]) for item in issues}
+
+    assert ("201", "missing_parent") in issue_types
+    assert ("301", "cycle") in issue_types
+    assert ("302", "cycle") in issue_types
+    assert "201" in graph["children_map"][COMPANY_HIERARCHY_ROOT_CODE]
+    assert "301" in graph["children_map"][COMPANY_HIERARCHY_ROOT_CODE]
+    assert "302" in graph["children_map"][COMPANY_HIERARCHY_ROOT_CODE]
+    assert graph["nodes"]["201"]["issue_label"] == "未挂接"
+    assert graph["nodes"]["301"]["issue_label"] == "异常"
+
+
+def test_company_hierarchy_graph_is_read_only_for_companies_and_dimensions():
+    _seed_company_master()
+    before_companies = execute_sql(
+        "SELECT code, name, parent_code, level, tree_path, is_consolidated, status FROM companies ORDER BY code"
+    ).to_dict("records")
+    before_dimensions = execute_sql(
+        "SELECT company_id, business_group FROM dim_company ORDER BY company_id"
+    ).to_dict("records")
+
+    graph = build_company_hierarchy_graph_data()
+    issues = detect_company_hierarchy_issues()
+    expanded = get_default_expanded_company_codes(graph_data=graph)
+
+    after_companies = execute_sql(
+        "SELECT code, name, parent_code, level, tree_path, is_consolidated, status FROM companies ORDER BY code"
+    ).to_dict("records")
+    after_dimensions = execute_sql(
+        "SELECT company_id, business_group FROM dim_company ORDER BY company_id"
+    ).to_dict("records")
+
+    assert graph["nodes"]["101"]["display_name"] == "集团"
+    assert issues == []
+    assert expanded
+    assert after_companies == before_companies
+    assert after_dimensions == before_dimensions
