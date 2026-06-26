@@ -57,7 +57,7 @@ python -c "from src.db_connection import init_database; init_database()"
 **方式一：Web 界面上传**
 
 ```bash
-streamlit run app.py
+streamlit run app.py --server.port 8502
 ```
 
 在浏览器中打开，进入「数据导入」页面上传 Excel 文件。

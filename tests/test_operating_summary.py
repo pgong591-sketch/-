@@ -1,5 +1,6 @@
 import pandas as pd
 
+import app
 from src import operating_summary
 from src.operating_summary import build_empty_operating_summary_rows, build_operating_summary_rows
 
@@ -79,3 +80,62 @@ def test_empty_operating_summary_keeps_table_structure():
     assert rows[-1]["费用科目"] == "净利润（不含折旧与摊销）"
     assert all(row["合计"] == 0 for row in rows)
     assert all(row["占费用比"] is None for row in rows)
+
+
+def test_profit_original_display_model_uses_version_6_item_names():
+    source_rows = build_empty_operating_summary_rows()
+
+    display_rows = app._profit_original_display_model_rows(source_rows)
+
+    assert [row["display_item_name"] for row in display_rows] == [
+        "学生福利及教具",
+        "房租水电",
+        "人工",
+        "税金",
+        "销售费用",
+        "办公",
+        "交际费",
+        "折旧及摊销",
+        "其他",
+        "成本费用合计",
+        "收入总额",
+        "净利润",
+        "净利润（不含计提折旧与摊销）",
+    ]
+    assert len(display_rows) == 13
+
+
+def test_profit_original_table_html_is_fixed_8_columns_without_colgroup():
+    row = app._profit_original_display_model_rows([
+        {
+            "费用科目": "收入合计",
+            "合计": 100.0,
+            "2026合计": 300.0,
+            "占费用比": None,
+            "占收入比": 1.0,
+            "备注": "来自收入成本费用明细表",
+            "row_type": "summary",
+            "is_profit": False,
+            "is_total": True,
+        }
+    ])[10]
+
+    header_html = app._profit_original_table_header_html()
+    row_html = app._profit_original_table_row_html(row, ["001"])
+    css = app._operating_design_css()
+
+    assert "<colgroup>" not in header_html
+    assert header_html.count("<th>") == 8
+    assert row_html.count("<td") == 8
+    assert "<td>收入总额</td>" in row_html
+    assert "来自收入成本费用明细表" in row_html
+    assert ".profit-original-table th:nth-child(1)" in css
+    assert ".profit-original-table th:nth-child(8)" in css
+    expected_widths = [18, 14, 9, 9, 15, 9, 9, 17]
+    for idx, width in enumerate(expected_widths, start=1):
+        assert (
+            f".profit-original-table th:nth-child({idx}),"
+            f".profit-original-table td:nth-child({idx})"
+            f"{{width:{width}%;}}"
+        ) in css
+    assert sum(expected_widths) == 100

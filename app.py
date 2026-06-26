@@ -1756,8 +1756,26 @@ NAV_MODULE_SECTIONS = {
         "报表处理": ["核算记录"],
     },
     "基础设置": {
-        "组织与系统": ["公司层级", "系统管理"],
+        "基础设置": [
+            "base_settings.overview",
+            "base_settings.organization",
+            "base_settings.company_profile",
+            "base_settings.name_standard",
+            "base_settings.collection_rules",
+            "base_settings.import_issues",
+            "base_settings.change_log",
+        ],
     },
+}
+
+BASE_SETTINGS_PAGE_TABS = {
+    "base_settings.overview": "首页",
+    "base_settings.organization": "组织架构",
+    "base_settings.company_profile": "公司档案",
+    "base_settings.name_standard": "名称口径",
+    "base_settings.collection_rules": "归集规则",
+    "base_settings.import_issues": "导入问题池",
+    "base_settings.change_log": "变更记录",
 }
 
 NAV_LABELS = {
@@ -1780,8 +1798,18 @@ NAV_LABELS = {
     "多期对比": "多期对比",
     "盈亏平衡测算": "盈亏平衡测算",
     "基础设置": "基础设置",
-    "公司层级": "公司层级",
-    "系统管理": "系统管理",
+    "base_settings.overview": "首页",
+    "base_settings.organization": "组织架构",
+    "base_settings.company_profile": "公司档案",
+    "base_settings.name_standard": "名称口径",
+    "base_settings.collection_rules": "归集规则",
+    "base_settings.import_issues": "导入问题池",
+    "base_settings.change_log": "变更记录",
+}
+NAV_PAGE_REDIRECTS = {
+    "基础设置": "base_settings.overview",
+    "公司层级": "base_settings.organization",
+    "系统管理": "base_settings.overview",
 }
 
 
@@ -1796,7 +1824,7 @@ def _sidebar_page_module_map(module_sections: dict[str, dict[str, list[str]]] | 
 
 
 def _normalize_sidebar_page(current: str | None) -> str:
-    page = str(current or "首页")
+    page = NAV_PAGE_REDIRECTS.get(str(current or "首页"), str(current or "首页"))
     return page if page in _sidebar_page_module_map() else "首页"
 
 
@@ -1809,10 +1837,12 @@ def _sidebar_expanded_state(
     page_module = _sidebar_page_module_map(sections)
     active_module = page_module.get(current_page, next(iter(sections)))
     existing = existing if isinstance(existing, dict) else {}
-    return {
+    state = {
         module: bool(existing[module]) if module in existing else module == active_module
         for module in sections
     }
+    state[active_module] = True
+    return state
 
 
 def _toggle_sidebar_module(expanded_modules: dict[str, bool], module_name: str) -> dict[str, bool]:
@@ -1835,19 +1865,24 @@ def render_sidebar():
             st.session_state.nav_choice = current
         page_module = _sidebar_page_module_map(module_sections)
         active_module = page_module.get(current, next(iter(module_sections)))
-        open_key = "nav_open_modules"
-        if open_key not in st.session_state:
-            st.session_state[open_key] = [active_module]
-        open_modules = [
-            module for module in st.session_state.get(open_key, [])
-            if module in module_sections
-        ]
-        st.session_state[open_key] = open_modules
+        if current in BASE_SETTINGS_PAGE_TABS:
+            st.session_state["base_settings_active_tab"] = BASE_SETTINGS_PAGE_TABS[current]
+        expanded_key = "sidebar_expanded_modules"
+        if expanded_key not in st.session_state:
+            legacy_open = st.session_state.get("nav_open_modules", [])
+            legacy_state = {module: module in legacy_open for module in module_sections} if isinstance(legacy_open, list) else {}
+            st.session_state[expanded_key] = _sidebar_expanded_state(current, legacy_state, module_sections)
+        else:
+            st.session_state[expanded_key] = _sidebar_expanded_state(
+                current,
+                st.session_state.get(expanded_key),
+                module_sections,
+            )
         st.session_state.nav_module = active_module
 
         for module_name, sections in module_sections.items():
             is_active_module = module_name == active_module
-            is_expanded = module_name in st.session_state[open_key]
+            is_expanded = bool(st.session_state[expanded_key].get(module_name))
             arrow = "▾" if is_expanded else "▸"
             module_icons = {"经营中心": "📊", "数据中心": "🗂", "财务中心": "💰", "基础设置": "⚙"}
             button_type = "primary" if (is_active_module or is_expanded) else "secondary"
@@ -1857,15 +1892,13 @@ def render_sidebar():
                 type=button_type,
                 use_container_width=True,
             ):
-                open_set = set(st.session_state[open_key])
-                if module_name in open_set:
-                    open_set.remove(module_name)
-                else:
-                    open_set.add(module_name)
-                st.session_state[open_key] = [item for item in module_sections if item in open_set]
+                st.session_state[expanded_key] = _toggle_sidebar_module(
+                    st.session_state[expanded_key],
+                    module_name,
+                )
                 st.rerun()
 
-            if module_name not in st.session_state[open_key]:
+            if not st.session_state[expanded_key].get(module_name):
                 continue
 
             for section, items in sections.items():
@@ -1875,6 +1908,8 @@ def render_sidebar():
                     if st.button(labels[item], key=f"nav_{item}", type=item_type, use_container_width=True):
                         st.session_state.nav_choice = item
                         st.session_state.nav_module = page_module.get(item, module_name)
+                        if item in BASE_SETTINGS_PAGE_TABS:
+                            st.session_state["base_settings_active_tab"] = BASE_SETTINGS_PAGE_TABS[item]
                         st.rerun()
 
         st.markdown('<div class="sidebar-note">本地数据仓库 · SQLite</div>', unsafe_allow_html=True)
@@ -3994,6 +4029,21 @@ PROFIT_ORIGINAL_SUBJECTS = [
 ]
 PROFIT_ORIGINAL_NORMAL_NAMES = [item["name"] for item in PROFIT_ORIGINAL_SUBJECTS if item["row_type"] == "normal"]
 PROFIT_ORIGINAL_STANDARD_COST_ITEMS = ["减：营业成本", "税金及附加", "销售费用", "管理费用", "财务费用"]
+PROFIT_ORIGINAL_DISPLAY_ROW_DEFINITIONS = [
+    ("学生福利及教具", ("学生福利及教具",)),
+    ("房租水电", ("房租水电",)),
+    ("人工", ("人工",)),
+    ("税金", ("税金",)),
+    ("销售费用", ("销售费用",)),
+    ("办公", ("办公",)),
+    ("交际费", ("交际费", "差旅交际费")),
+    ("折旧及摊销", ("折旧及摊销",)),
+    ("其他", ("其他",)),
+    ("成本费用合计", ("成本费用合计",)),
+    ("收入总额", ("收入总额", "收入合计", "收入")),
+    ("净利润", ("净利润",)),
+    ("净利润（不含计提折旧与摊销）", ("净利润（不含计提折旧与摊销）", "净利润（不含折旧与摊销）")),
+]
 
 
 def _profit_original_exact_value(detail_df: pd.DataFrame, item_name: str, column: str) -> float | None:
@@ -4216,6 +4266,14 @@ def _operating_design_css() -> str:
       .profit-original-card-tip{font-size:12px;color:var(--text-secondary);}
       .profit-original-table-scroll{max-height:none;overflow:visible;background:#fff;}
       .profit-original-table{width:100%;min-width:0;border-collapse:separate;border-spacing:0;font-size:13px;table-layout:fixed;}
+      .profit-original-table th:nth-child(1),.profit-original-table td:nth-child(1){width:18%;}
+      .profit-original-table th:nth-child(2),.profit-original-table td:nth-child(2){width:14%;}
+      .profit-original-table th:nth-child(3),.profit-original-table td:nth-child(3){width:9%;}
+      .profit-original-table th:nth-child(4),.profit-original-table td:nth-child(4){width:9%;}
+      .profit-original-table th:nth-child(5),.profit-original-table td:nth-child(5){width:15%;}
+      .profit-original-table th:nth-child(6),.profit-original-table td:nth-child(6){width:9%;}
+      .profit-original-table th:nth-child(7),.profit-original-table td:nth-child(7){width:9%;}
+      .profit-original-table th:nth-child(8),.profit-original-table td:nth-child(8){width:17%;}
       .profit-original-table th{
         height:44px;background:var(--table-header-bg);
         color:var(--text-main);font-size:13px;font-weight:700;text-align:center;
@@ -4280,7 +4338,38 @@ def _profit_original_mom_cell(value: float | None) -> str:
     return f'<span class="{cls}">{_html(_operating_pct_cell(amount))}</span>{tags}'
 
 
+def _profit_original_display_model_rows(rows: list[dict]) -> list[dict]:
+    source_by_name = {str(row.get("费用科目") or "").strip(): row for row in rows}
+    display_rows = []
+    for display_name, source_names in PROFIT_ORIGINAL_DISPLAY_ROW_DEFINITIONS:
+        source = next((source_by_name[name] for name in source_names if name in source_by_name), None)
+        if source is None:
+            row = {
+                "row_idx": len(display_rows),
+                "费用科目": display_name,
+                "display_item_name": display_name,
+                "合计": 0.0,
+                "2026合计": 0.0,
+                "占费用比": None,
+                "占收入比": None,
+                "备注": "",
+                "row_type": "profit" if display_name.startswith("净利润") else "summary" if display_name in {"成本费用合计", "收入总额"} else "normal",
+                "is_profit": display_name.startswith("净利润"),
+                "is_total": display_name in {"成本费用合计", "收入总额"},
+            }
+        else:
+            row = dict(source)
+            row["row_idx"] = len(display_rows)
+            row["display_item_name"] = display_name
+            row["费用科目"] = display_name
+            if "2026合计" not in row:
+                row["2026合计"] = row.get("年度合计", row.get("合计"))
+        display_rows.append(row)
+    return display_rows
+
+
 def _profit_original_display_rows(rows: list[dict], mode: str) -> list[dict]:
+    rows = _profit_original_display_model_rows(rows)
     if mode == "anomaly":
         return [row for row in rows if row.get("环比") is not None and abs(_safe_float(row.get("环比"))) >= 0.3]
     if mode == "summary":
@@ -4303,17 +4392,43 @@ def _profit_original_export_df(rows: list[dict]) -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
-                "费用科目": row["费用科目"],
-                "合计": _safe_float(row.get("合计")),
-                "占费用比": _safe_float(row.get("占费用比")) * 100 if row.get("占费用比") is not None else None,
-                "占收入比": _safe_float(row.get("占收入比")) * 100 if row.get("占收入比") is not None else None,
-                "上月": row.get("上月"),
-                "环比": _safe_float(row.get("环比")) * 100 if row.get("环比") is not None else None,
+                "费用科目": row["display_item_name"],
+                "当月数": _safe_float(row.get("合计")),
+                "当月占费用比": _safe_float(row.get("占费用比")) * 100 if row.get("占费用比") is not None else None,
+                "当月占收入比": _safe_float(row.get("占收入比")) * 100 if row.get("占收入比") is not None else None,
+                "年度合计": _safe_float(row.get("2026合计")),
+                "年度占费用比": _safe_float(row.get("年度占费用比", row.get("占费用比"))) * 100 if row.get("年度占费用比", row.get("占费用比")) is not None else None,
+                "年度占收入比": _safe_float(row.get("年度占收入比", row.get("占收入比"))) * 100 if row.get("年度占收入比", row.get("占收入比")) is not None else None,
                 "备注": row.get("备注", ""),
             }
-            for row in rows
+            for row in _profit_original_display_model_rows(rows)
         ]
     )
+
+
+def _profit_original_table_row_html(row: dict, company_codes: list[str]) -> str:
+    cells = [
+        f'<td>{_html(row["display_item_name"])}</td>',
+        f'<td>{_profit_original_amount_link(row["row_idx"], "total", row.get("合计"))}</td>',
+        f'<td>{_html(_operating_pct_cell(row.get("占费用比")))}</td>',
+        f'<td>{_html(_operating_pct_cell(row.get("占收入比")))}</td>',
+        f'<td>{_profit_original_amount_link(row["row_idx"], "ytd", row.get("2026合计"))}</td>',
+        f'<td>{_html(_operating_pct_cell(row.get("年度占费用比", row.get("占费用比"))))}</td>',
+        f'<td>{_html(_operating_pct_cell(row.get("年度占收入比", row.get("占收入比"))))}</td>',
+        f'<td class="remark-cell">{_html(_profit_original_remark(row, company_codes))}</td>',
+    ]
+    return f'<tr class="{_profit_original_row_class(row)}">{"".join(cells)}</tr>'
+
+
+def _profit_original_table_header_html() -> str:
+    return """
+<thead>
+<tr>
+<th>费用项目</th><th>当月数</th><th>当月占费用比</th><th>当月占收入比</th>
+<th>年度合计</th><th>年度占费用比</th><th>年度占收入比</th><th>备注</th>
+</tr>
+</thead>
+"""
 
 
 def _render_profit_original_amount_detail(
@@ -4451,18 +4566,7 @@ def _render_operating_original_design(
         st.info("当前页按统一筛选条件汇总展示经营损益明细；数据只从收入成本费用明细表归集，组织主体按公司组织架构展开后汇总。金额下钻暂未开启。")
 
     visible_rows = _profit_original_display_rows(rows, st.session_state[mode_key])
-    body_rows = []
-    for row in visible_rows:
-        cells = [
-            f'<td>{_html(row["费用科目"])}</td>',
-            f'<td>{_profit_original_amount_link(row["row_idx"], "total", row["合计"])}</td>',
-            f'<td>{_html(_operating_pct_cell(row["占费用比"]))}</td>',
-            f'<td>{_html(_operating_pct_cell(row["占收入比"]))}</td>',
-            f'<td>{_profit_original_amount_link(row["row_idx"], "previous", row["上月"])}</td>',
-            f'<td>{_profit_original_mom_cell(row["环比"])}</td>',
-            f'<td class="remark-cell">{_html(_profit_original_remark(row, company_codes))}</td>',
-        ]
-        body_rows.append(f'<tr class="{_profit_original_row_class(row)}">{"".join(cells)}</tr>')
+    body_rows = [_profit_original_table_row_html(row, company_codes) for row in visible_rows]
     empty_html = '<div class="profit-original-empty">当前筛选条件下暂无经营汇总数据。</div>' if not body_rows else ""
     table_html = f"""<div class="profit-original-shell">
 <div class="profit-original-card">
@@ -4476,16 +4580,7 @@ def _render_operating_original_design(
 <div class="profit-original-table-scroll">
 {empty_html}
 <table class="profit-original-table">
-<colgroup>
-<col style="width:18%"><col style="width:13%"><col style="width:10%">
-<col style="width:10%"><col style="width:14%"><col style="width:10%">
-<col style="width:25%">
-</colgroup>
-<thead>
-<tr>
-<th>费用科目</th><th>合计</th><th>占费用比</th><th>占收入比</th><th>上月</th><th>环比</th><th>备注</th>
-</tr>
-</thead>
+{_profit_original_table_header_html()}
 <tbody>{"".join(body_rows)}</tbody>
 </table>
 </div>
@@ -6747,7 +6842,11 @@ def _render_base_settings_change_log():
 
 def render_base_settings():
     st.markdown('<div class="page-header">⚙️ 基础设置</div>', unsafe_allow_html=True)
-    tabs = st.tabs(["首页", "组织架构", "公司档案", "名称口径", "归集规则", "导入问题池", "变更记录"])
+    tab_labels = ["首页", "组织架构", "公司档案", "名称口径", "归集规则", "导入问题池", "变更记录"]
+    active_tab = st.session_state.get("base_settings_active_tab", "首页")
+    if active_tab not in tab_labels:
+        active_tab = "首页"
+    tabs = st.tabs(tab_labels, default=active_tab, key="base_settings_tabs")
     with tabs[0]:
         _render_base_settings_home()
     with tabs[1]:
@@ -7084,6 +7183,13 @@ def main():
         "合并报表": render_consolidated,
         "多期对比": render_multi_period,
         "基础设置": render_base_settings,
+        "base_settings.overview": render_base_settings,
+        "base_settings.organization": render_base_settings,
+        "base_settings.company_profile": render_base_settings,
+        "base_settings.name_standard": render_base_settings,
+        "base_settings.collection_rules": render_base_settings,
+        "base_settings.import_issues": render_base_settings,
+        "base_settings.change_log": render_base_settings,
         "公司层级": render_company_hierarchy,
         "系统管理": render_admin,
     }
