@@ -76,6 +76,11 @@ from src.base_settings_service import (
     get_default_expanded_company_codes,
     resolve_company_identity,
 )
+from src.filter_options_service import (
+    apply_internal_management_fee_elimination,
+    get_report_company_scope,
+    get_workspace_company_options,
+)
 
 try:
     import plotly.express as px
@@ -94,9 +99,13 @@ PAGE_CSS = """
         --muted: #64748b;
         --border: #cfd9e8;
         --border-soft: #dce5f2;
-        --accent: #1267e8;
-        --accent-hover: #0b57cb;
+        --accent: #0a84ff;
+        --accent-hover: #0071e3;
         --accent-soft: #e8f2ff;
+        --ios-blue-soft: rgba(10, 132, 255, 0.12);
+        --ios-fill: rgba(255, 255, 255, 0.82);
+        --ios-fill-hover: rgba(255, 255, 255, 0.96);
+        --ios-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
         --table-head: #dceafe;
         --table-band: #f7faff;
         --success: #248a3d;
@@ -320,9 +329,9 @@ PAGE_CSS = """
     }
 
     .page-header {
-        font-size: 1.45rem;
+        font-size: 1.5rem;
         line-height: 1.25;
-        font-weight: 700;
+        font-weight: 720;
         color: var(--text);
         padding: 0.15rem 0 0.75rem;
         border-bottom: 1px solid var(--border-soft);
@@ -401,7 +410,7 @@ PAGE_CSS = """
     .home-filter-title {
         font-size: 0.86rem;
         color: #17345f;
-        font-weight: 800;
+        font-weight: 720;
         margin-bottom: 0.05rem;
         display: flex;
         align-items: center;
@@ -488,6 +497,31 @@ PAGE_CSS = """
         flex: 0 0 auto !important;
     }
 
+    .operating-filter-label {
+        min-width: 4.65rem;
+        text-align: right;
+        padding-right: 0.28rem;
+        box-sizing: border-box;
+    }
+
+    [class*="profit_original_filter_year_pills"],
+    [class*="profit_original_filter_month_pills"],
+    [class*="profit_original_filter_group_pills"],
+    [class*="operating_summary_filter_year_pills"],
+    [class*="operating_summary_filter_month_pills"],
+    [class*="operating_summary_filter_group_pills"] {
+        margin-left: 0 !important;
+        padding-left: 0.38rem !important;
+    }
+
+    [class*="profit_original_filter_group_pills"] div[role="radiogroup"],
+    [class*="operating_summary_filter_group_pills"] div[role="radiogroup"] {
+        flex-wrap: wrap !important;
+        overflow-x: visible !important;
+        gap: 0.55rem !important;
+        row-gap: 0.38rem !important;
+    }
+
     [class*="_summary_mode_pills"] [data-testid^="stBaseButton"] {
         border-radius: 8px !important;
         border: 1px solid rgba(37, 99, 235, 0.28) !important;
@@ -535,7 +569,7 @@ PAGE_CSS = """
 
     .metric-card {
         background: var(--surface);
-        border-radius: 8px;
+        border-radius: 10px;
         padding: 1.15rem;
         text-align: left;
         border: 1px solid var(--border-soft);
@@ -543,21 +577,22 @@ PAGE_CSS = """
     }
 
     .metric-card .icon {
-        font-size: 1.35rem;
+        font-size: 1.22rem;
         margin-bottom: 0.45rem;
+        opacity: 0.82;
     }
 
     .metric-card .value {
-        font-size: 1.7rem;
+        font-size: 1.62rem;
         line-height: 1.15;
-        font-weight: 700;
+        font-weight: 720;
         color: var(--text);
     }
 
     .metric-card .label {
-        font-size: 0.82rem;
+        font-size: 0.8rem;
         color: var(--muted);
-        font-weight: 500;
+        font-weight: 520;
         text-transform: none;
         margin-top: 0.2rem;
     }
@@ -583,21 +618,31 @@ PAGE_CSS = """
     }
 
     div.stButton > button {
-        border-radius: 6px;
-        font-weight: 600;
-        font-size: 0.78rem;
-        padding: 0.2rem 0.52rem;
-        min-height: 1.9rem;
-        border: 1px solid var(--border);
-        transition: none !important;
-        box-shadow: none;
+        border-radius: 9px;
+        font-weight: 620;
+        font-size: 0.82rem;
+        padding: 0.24rem 0.68rem;
+        min-height: 2.08rem;
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        background: var(--ios-fill);
+        color: #1f2a3d;
+        transition: background-color .12s ease, border-color .12s ease, color .12s ease !important;
+        box-shadow: var(--ios-shadow);
     }
 
     div.stButton > button [class*="material-symbols"] {
-        font-size: 0.9rem !important;
+        font-size: 1rem !important;
+        font-weight: 300 !important;
         line-height: 1 !important;
-        margin-right: 0.2rem !important;
-        opacity: 0.9;
+        margin-right: 0.28rem !important;
+        opacity: 0.82;
+        font-variation-settings: "FILL" 0, "wght" 300, "GRAD" 0, "opsz" 20;
+    }
+
+    div.stButton > button:hover {
+        background: var(--ios-fill-hover);
+        border-color: rgba(10, 132, 255, 0.32);
+        color: #0b57cb;
     }
 
     div[data-testid="stHorizontalBlock"] {
@@ -612,12 +657,31 @@ PAGE_CSS = """
         background: var(--accent);
         border-color: var(--accent);
         color: #ffffff;
+        box-shadow: none;
     }
 
     div.stButton > button[kind="primary"]:hover {
         background: var(--accent-hover);
         border-color: var(--accent-hover);
         color: #ffffff;
+    }
+
+    div[data-testid="stDownloadButton"] > button {
+        border-radius: 9px;
+        min-height: 2.08rem;
+        padding: 0.24rem 0.68rem;
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        background: var(--ios-fill);
+        color: #1f2a3d;
+        box-shadow: var(--ios-shadow);
+        font-size: 0.82rem;
+        font-weight: 620;
+    }
+
+    div[data-testid="stDownloadButton"] > button:hover {
+        background: var(--ios-fill-hover);
+        border-color: rgba(10, 132, 255, 0.32);
+        color: #0b57cb;
     }
 
     div[data-testid="stDataFrame"],
@@ -667,25 +731,27 @@ PAGE_CSS = """
     div[data-testid="stFileUploader"] label,
     div[data-testid="stRadio"] label {
         color: #4b5f78 !important;
-        font-size: 0.76rem !important;
-        font-weight: 650 !important;
+        font-size: 0.78rem !important;
+        font-weight: 620 !important;
         margin-bottom: 0.12rem !important;
     }
 
     div[data-baseweb="select"] > div,
     div[data-testid="stTextInput"] input,
     div[data-testid="stNumberInput"] input {
-        min-height: 2.2rem !important;
-        border-radius: 6px !important;
-        border-color: #d5e1f0 !important;
-        background: #ffffff !important;
-        font-size: 0.82rem !important;
+        min-height: 2.28rem !important;
+        border-radius: 9px !important;
+        border-color: rgba(148, 163, 184, 0.34) !important;
+        background: rgba(255, 255, 255, 0.9) !important;
+        font-size: 0.86rem !important;
         color: #122033 !important;
+        box-shadow: var(--ios-shadow) !important;
     }
 
     div[data-baseweb="select"] span,
     div[data-testid="stTextInput"] input::placeholder {
-        font-size: 0.82rem !important;
+        font-size: 0.86rem !important;
+        color: #8a95a8 !important;
     }
 
     .stTabs [data-baseweb="tab-list"] {
@@ -698,7 +764,7 @@ PAGE_CSS = """
         padding: 0 0.25rem;
         color: #42526a;
         font-size: 0.84rem;
-        font-weight: 650;
+        font-weight: 620;
     }
 
     .stTabs [aria-selected="true"] {
@@ -1029,8 +1095,8 @@ PAGE_CSS = """
 
     .nav-section-title {
         color: #94a3b8 !important;
-        font-size: 0.74rem !important;
-        font-weight: 650 !important;
+        font-size: 0.78rem !important;
+        font-weight: 700 !important;
         letter-spacing: 0.02em !important;
         text-transform: none !important;
         margin: 0.82rem 0 0.34rem !important;
@@ -1088,8 +1154,8 @@ PAGE_CSS = """
         margin-top: 0.6rem !important;
         padding: 0.52rem 0.64rem !important;
         color: #e5eaf3 !important;
-        font-size: 1.02rem !important;
-        font-weight: 760 !important;
+        font-size: 1rem !important;
+        font-weight: 800 !important;
         border-radius: 12px !important;
         background: rgba(255,255,255,0.05) !important;
         border-color: rgba(255,255,255,0.08) !important;
@@ -1108,6 +1174,8 @@ PAGE_CSS = """
         gap: 0.5rem !important;
         width: 100% !important;
         white-space: nowrap !important;
+        font-size: 1rem !important;
+        font-weight: 800 !important;
     }
 
     [class*="st-key-nav_module_toggle_"] button[kind="primary"] {
@@ -1133,8 +1201,8 @@ PAGE_CSS = """
         margin: 0.12rem 0 0.12rem 0.82rem !important;
         padding: 0.28rem 0.52rem 0.28rem 0.78rem !important;
         color: #cbd5e1 !important;
-        font-size: 0.86rem !important;
-        font-weight: 520 !important;
+        font-size: 0.92rem !important;
+        font-weight: 680 !important;
         border-radius: 9px !important;
     }
 
@@ -1142,7 +1210,7 @@ PAGE_CSS = """
         background: rgba(59,130,246,0.18) !important;
         border-color: transparent !important;
         color: #bfdbfe !important;
-        font-weight: 650 !important;
+        font-weight: 740 !important;
     }
 
     [class*="st-key-nav_"]:not([class*="st-key-nav_module_toggle_"]) button[kind="primary"]::before {
@@ -1837,12 +1905,10 @@ def _sidebar_expanded_state(
     page_module = _sidebar_page_module_map(sections)
     active_module = page_module.get(current_page, next(iter(sections)))
     existing = existing if isinstance(existing, dict) else {}
-    state = {
+    return {
         module: bool(existing[module]) if module in existing else module == active_module
         for module in sections
     }
-    state[active_module] = True
-    return state
 
 
 def _toggle_sidebar_module(expanded_modules: dict[str, bool], module_name: str) -> dict[str, bool]:
@@ -1869,8 +1935,12 @@ def render_sidebar():
             st.session_state["base_settings_active_tab"] = BASE_SETTINGS_PAGE_TABS[current]
         expanded_key = "sidebar_expanded_modules"
         if expanded_key not in st.session_state:
-            legacy_open = st.session_state.get("nav_open_modules", [])
-            legacy_state = {module: module in legacy_open for module in module_sections} if isinstance(legacy_open, list) else {}
+            legacy_open = st.session_state.get("nav_open_modules")
+            legacy_state = (
+                {module: module in legacy_open for module in module_sections}
+                if isinstance(legacy_open, list) and legacy_open
+                else {}
+            )
             st.session_state[expanded_key] = _sidebar_expanded_state(current, legacy_state, module_sections)
         else:
             st.session_state[expanded_key] = _sidebar_expanded_state(
@@ -1977,69 +2047,19 @@ def _previous_period(periods: list[str], current_period: str) -> str | None:
     return periods[next_idx]
 
 
-def _resolve_scope_company_codes(scope_code: str | None, business_group: str | None = None) -> list[str]:
-    business_group_value = str(business_group).strip() if business_group is not None else None
-    if scope_code:
-        codes = [str(code) for code in get_company_list_for_summary(scope_code) if str(code)]
-        if not codes:
-            base_codes = [scope_code]
-        else:
-            placeholders = ", ".join(f":code_{idx}" for idx, _ in enumerate(codes))
-            params = {f"code_{idx}": code for idx, code in enumerate(codes)}
-            df = execute_sql(
-                f"""
-                SELECT code
-                FROM companies
-                WHERE status = 1
-                  AND is_consolidated = 1
-                  AND code IN ({placeholders})
-                """,
-                params,
-            )
-            base_codes = df["code"].astype(str).tolist() if len(df) else [scope_code]
-    else:
-        df = execute_sql(
-            """
-            SELECT code
-            FROM companies
-            WHERE status = 1 AND is_consolidated = 1
-            ORDER BY tree_path, code
-            """
-        )
-        base_codes = df["code"].astype(str).tolist() if len(df) else []
-
-    if (
-        not business_group_value
-        or business_group_value in {"不限", "全部", "*", "??"}
-        or business_group_value.replace("?", "") == ""
-    ):
-        return base_codes
-
-    if not base_codes:
-        return base_codes
-
-    params = {"business_group": business_group_value}
-    holders = []
-    for idx, code in enumerate(base_codes):
-        key = f"base_code_{idx}"
-        params[key] = code
-        holders.append(f":{key}")
-
-    group_df = execute_sql(
-        f"""
-        SELECT code
-        FROM companies
-        WHERE code IN ({', '.join(holders)})
-          AND code IN (
-              SELECT CAST(company_id AS TEXT)
-              FROM dim_company
-              WHERE COALESCE(NULLIF(TRIM(business_group), ''), '未分组') = :business_group
-          )
-        ORDER BY tree_path, code
-        """,
-        params,
+def _resolve_scope_company_codes(
+    scope_code: str | None,
+    business_group: str | None = None,
+    business_type: str | None = None,
+    region: str | None = None,
+) -> list[str]:
+    selected = [scope_code] if scope_code else []
+    return get_report_company_scope(
+        selected,
+        business_group=business_group,
+        business_type=business_type,
+        region=region,
     )
-    return group_df["code"].astype(str).tolist() if len(group_df) else []
 
 
 @st.cache_data(show_spinner=False, ttl=60)
@@ -2162,31 +2182,15 @@ def _toggle_workspace_filter_expanded(key_prefix: str) -> None:
 
 
 @st.cache_data(show_spinner=False, ttl=60)
-def _get_workspace_company_options(business_group: str | None = None) -> pd.DataFrame:
-    business_group_value = str(business_group or "").strip()
-    group_filter = ""
-    params: dict[str, str] = {}
-    if business_group_value and business_group_value not in {"不限", "全部", "*"}:
-        group_filter = """
-          AND COALESCE(NULLIF(TRIM(d.business_group), ''), '未分组') = :business_group
-        """
-        params["business_group"] = business_group_value
-
-    return execute_sql(
-        f"""
-        SELECT
-            CAST(c.code AS TEXT) AS code,
-            COALESCE(NULLIF(TRIM(c.name), ''), CAST(c.code AS TEXT)) AS name,
-            COALESCE(NULLIF(TRIM(d.business_group), ''), '未分组') AS business_group
-        FROM companies c
-        LEFT JOIN dim_company d
-          ON CAST(d.company_id AS TEXT) = CAST(c.code AS TEXT)
-        WHERE c.status = 1
-          AND c.is_consolidated = 1
-          {group_filter}
-        ORDER BY c.tree_path, c.code
-        """,
-        params,
+def _get_workspace_company_options(
+    business_group: str | None = None,
+    business_type: str | None = None,
+    region: str | None = None,
+) -> pd.DataFrame:
+    return get_workspace_company_options(
+        business_group=business_group,
+        business_type=business_type,
+        region=region,
     )
 
 
@@ -2203,19 +2207,15 @@ def _workspace_company_labels(company_options: pd.DataFrame) -> dict[str, str]:
 
 
 def _resolve_filter_company_codes(filters: dict, scope_code: str | None = None) -> list[str]:
-    base_codes = _resolve_scope_company_codes(scope_code, business_group=filters.get("business_group"))
     selected_codes = [str(code) for code in filters.get("selected_company_codes", []) if str(code)]
-    if not selected_codes:
-        return base_codes
-    selected_set: set[str] = set()
-    for code in selected_codes:
-        try:
-            selected_set.update(str(item) for item in get_company_list_for_summary(code) if str(item))
-        except Exception:
-            selected_set.add(code)
-    if not selected_set:
-        selected_set = set(selected_codes)
-    return [code for code in base_codes if code in selected_set]
+    if scope_code and not selected_codes:
+        selected_codes = [scope_code]
+    return get_report_company_scope(
+        selected_codes,
+        business_group=filters.get("business_group"),
+        business_type=filters.get("business_type"),
+        region=filters.get("region"),
+    )
 
 
 def _workspace_scope_label(filters: dict) -> str:
@@ -2340,6 +2340,8 @@ def _render_more_filter_panel(
     year_key: str,
     month_key: str,
     group_key: str,
+    business_type_key: str,
+    region_key: str,
     note: str | None = None,
 ) -> None:
     st.markdown('<div class="home-filter-divider"></div>', unsafe_allow_html=True)
@@ -2356,6 +2358,7 @@ def _render_more_filter_panel(
         month_options,
         st.session_state[month_key],
         month_key,
+        format_func=_filter_month_format_func(key_prefix),
     )
     _render_filter_pills_row(
         f"{key_prefix}_filter_group",
@@ -2371,9 +2374,9 @@ def _render_more_filter_panel(
     with status_col:
         st.selectbox("数据状态", ["全部", "草稿", "已审核", "已锁定"], key=status_key)
     with type_col:
-        st.selectbox("业态", ["不限"] + BUSINESS_TYPE_OPTIONS, key=f"{key_prefix}_business_type")
+        st.selectbox("业态", ["不限"] + BUSINESS_TYPE_OPTIONS, key=business_type_key)
     with region_col:
-        st.selectbox("区域", ["不限"] + REGION_OPTIONS, key=f"{key_prefix}_region")
+        st.selectbox("区域", ["不限"] + REGION_OPTIONS, key=region_key)
     if note:
         st.markdown(f'<div class="home-filter-note">{_html(note)}</div>', unsafe_allow_html=True)
 
@@ -2404,6 +2407,8 @@ def _render_workspace_filter_bar(
     group_key = f"{key_prefix}_filter_group"
     summary_key = f"{key_prefix}_summary_mode"
     company_key = f"{key_prefix}_company_units"
+    business_type_key = f"{key_prefix}_business_type"
+    region_key = f"{key_prefix}_region"
 
     if expanded_key not in st.session_state:
         st.session_state[expanded_key] = False
@@ -2415,6 +2420,10 @@ def _render_workspace_filter_bar(
         st.session_state[group_key] = "不限"
     if summary_key not in st.session_state or st.session_state[summary_key] not in summary_mode_options:
         st.session_state[summary_key] = summary_mode_options[0]
+    if business_type_key not in st.session_state or st.session_state[business_type_key] not in ["不限"] + BUSINESS_TYPE_OPTIONS:
+        st.session_state[business_type_key] = "不限"
+    if region_key not in st.session_state or st.session_state[region_key] not in ["不限"] + REGION_OPTIONS:
+        st.session_state[region_key] = "不限"
 
     if st.session_state.get(f"{key_prefix}_filter_year_pills") in year_options:
         st.session_state[year_key] = st.session_state[f"{key_prefix}_filter_year_pills"]
@@ -2425,7 +2434,11 @@ def _render_workspace_filter_bar(
 
     selected_year = st.session_state[year_key]
     selected_month = st.session_state[month_key]
-    company_options_df = _get_workspace_company_options(st.session_state[group_key])
+    company_options_df = _get_workspace_company_options(
+        st.session_state[group_key],
+        st.session_state[business_type_key],
+        st.session_state[region_key],
+    )
     filtered_periods = [
         p for p in periods
         if (selected_year == "不限" or str(p).startswith(selected_year))
@@ -2520,11 +2533,15 @@ def _render_workspace_filter_bar(
                 year_key,
                 month_key,
                 group_key,
+                business_type_key,
+                region_key,
                 note,
             )
     result = {
         "summary_mode": st.session_state[summary_key],
         "business_group": st.session_state[group_key],
+        "business_type": st.session_state[business_type_key],
+        "region": st.session_state[region_key],
         "selected_company_codes": list(st.session_state.get(company_key, [])),
         "filtered_periods": filtered_periods,
     }
@@ -2580,6 +2597,7 @@ def _render_filter_pills_row(
     options: list[str],
     selected: str,
     session_key: str,
+    format_func=None,
 ) -> None:
     if not options:
         return
@@ -2592,20 +2610,44 @@ def _render_filter_pills_row(
     if widget_key not in st.session_state:
         st.session_state[widget_key] = current_value
 
-    label_col, pills_col = st.columns([1.05, 16.65], gap="small")
+    is_operating_filter = row_key.startswith(("profit_original_filter_", "operating_summary_filter_"))
+    label_weight = 1.45 if is_operating_filter else 1.05
+    pills_weight = 16.25 if is_operating_filter else 16.65
+    column_gap = "medium" if is_operating_filter else "small"
+    label_class = "quick-filter-label operating-filter-label" if is_operating_filter else "quick-filter-label"
+
+    label_col, pills_col = st.columns([label_weight, pills_weight], gap=column_gap)
     with label_col:
-        st.markdown(f'<div class="quick-filter-label">{_html(label)}：</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="{label_class}">{_html(label)}：</div>', unsafe_allow_html=True)
     with pills_col:
         picked = st.pills(
             label,
             options,
             selection_mode="single",
             default=current_value,
+            format_func=format_func,
             key=widget_key,
             label_visibility="collapsed",
             width="content",
         )
         st.session_state[session_key] = picked if picked in options else current_value
+
+
+def _filter_month_display_label(value) -> str:
+    text = str(value)
+    if text == "不限":
+        return text
+    if text.isdigit():
+        month = int(text)
+        if 1 <= month <= 12:
+            return f"{month}月"
+    return text
+
+
+def _filter_month_format_func(key_prefix: str):
+    if key_prefix in {"profit_original", "operating_summary"}:
+        return _filter_month_display_label
+    return None
 
 
 def _query_metric_by_group(
@@ -3950,7 +3992,7 @@ def _operating_table_rows(
                 "row_idx": len(rows),
                 "费用科目": item_name,
                 "合计": amount,
-                "2026合计": amount,
+                "2026合计": None,
                 "占费用比": _safe_ratio_ui(amount, expense_total),
                 "占收入比": _safe_ratio_ui(amount, revenue_total),
                 "上月": previous if item_name in previous_map else None,
@@ -4218,7 +4260,7 @@ def _profit_original_table_rows(
                 "row_idx": len(rows),
                 "费用科目": name,
                 "合计": amount,
-                "2026合计": amount,
+                "2026合计": None,
                 "占费用比": _safe_ratio_ui(amount, cost_total) if row_type == "normal" or name == "成本费用合计" else None,
                 "占收入比": _safe_ratio_ui(amount, revenue_total),
                 "上月": previous_float if has_previous and not estimated_normal else None,
@@ -4507,7 +4549,7 @@ def _render_operating_original_design(
     filters: dict | None = None,
     operating_rows: list[dict] | None = None,
 ) -> None:
-    rows = operating_rows if operating_rows is not None else _profit_original_table_rows(detail_df, previous_detail_df)
+    rows = operating_rows if operating_rows is not None else build_empty_operating_summary_rows()
     mode_key = "profit_original_view_mode"
     if mode_key not in st.session_state:
         st.session_state[mode_key] = "standard"
@@ -4971,11 +5013,13 @@ def render_profit_original_table():
     scope_label = _workspace_scope_label(filters)
     previous_period = _operating_previous_period(periods, period)
     source_df = get_operating_summary_source_detail(period, company_codes)
+    source_df = apply_internal_management_fee_elimination(source_df, company_codes)
     previous_source_df = (
         get_operating_summary_source_detail(previous_period, company_codes)
         if previous_period
         else pd.DataFrame()
     )
+    previous_source_df = apply_internal_management_fee_elimination(previous_source_df, company_codes)
     operating_rows = build_operating_summary_rows(source_df, previous_source_df)
     if not operating_rows:
         st.warning("当前期间暂无收入成本费用明细表数据，已先展示经营汇总表结构。请在数据导入中导入“收入成本费用明细表/损益明细表”后生成真实金额。")
@@ -4989,6 +5033,22 @@ def render_profit_original_table():
         filters,
         operating_rows,
     )
+
+
+def _build_operating_original_rows_for_scope(
+    period: str,
+    previous_period: str | None,
+    company_codes: list[str],
+) -> list[dict]:
+    source_df = get_operating_summary_source_detail(period, company_codes)
+    source_df = apply_internal_management_fee_elimination(source_df, company_codes)
+    previous_source_df = (
+        get_operating_summary_source_detail(previous_period, company_codes)
+        if previous_period
+        else pd.DataFrame()
+    )
+    previous_source_df = apply_internal_management_fee_elimination(previous_source_df, company_codes)
+    return build_operating_summary_rows(source_df, previous_source_df)
 
 
 def render_expense_subject_analysis():
@@ -5152,7 +5212,18 @@ def render_multi_operating_summary():
 
     tab_original, tab_dashboard, tab_expense, tab_template = st.tabs(["原表增强", "驾驶舱下钻", "费用科目分析", "模板预览"])
     with tab_original:
-        _render_operating_original_design(period, scope_label, company_codes, detail_df, previous_detail_df)
+        operating_rows = _build_operating_original_rows_for_scope(period, previous_period, company_codes)
+        if not operating_rows:
+            operating_rows = build_empty_operating_summary_rows()
+        _render_operating_original_design(
+            period,
+            scope_label,
+            company_codes,
+            detail_df,
+            previous_detail_df,
+            filters,
+            operating_rows,
+        )
         if len(summary_df) or len(company_df):
             export_sheets = {"原表增强": _operating_detail_display(detail_df), "经营汇总": summary_df, "主体拆分": company_df}
             st.download_button(
@@ -6704,7 +6775,44 @@ def _render_base_settings_org():
         try:
             ownership_df = get_ownership_grid()
             if len(ownership_df):
-                st.dataframe(ownership_df, use_container_width=True, hide_index=True, height=520)
+                ownership_display = ownership_df.rename(columns={
+                    "parent_code": "母公司编码",
+                    "parent_name": "母公司名称",
+                    "sub_code": "子公司编码",
+                    "sub_name": "子公司名称",
+                    "business_group": "所属板块",
+                    "business_type": "业态类型",
+                    "ownership_pct": "投资占比(%)",
+                    "investment_category": "投资分类",
+                    "effective_date": "生效日期",
+                    "expiration_date": "失效日期",
+                    "is_control": "是否控制",
+                })
+                visible_cols = [
+                    "母公司编码", "母公司名称", "子公司编码", "子公司名称",
+                    "所属板块", "业态类型", "投资占比(%)", "投资分类",
+                    "生效日期", "失效日期", "是否控制",
+                ]
+                visible_cols = [col for col in visible_cols if col in ownership_display.columns]
+                st.dataframe(
+                    ownership_display[visible_cols],
+                    use_container_width=True,
+                    hide_index=True,
+                    height=520,
+                    column_config={
+                        "母公司编码": st.column_config.TextColumn("母公司编码", width="small"),
+                        "母公司名称": st.column_config.TextColumn("母公司名称", width="medium"),
+                        "子公司编码": st.column_config.TextColumn("子公司编码", width="small"),
+                        "子公司名称": st.column_config.TextColumn("子公司名称", width="medium"),
+                        "所属板块": st.column_config.TextColumn("所属板块", width="small"),
+                        "业态类型": st.column_config.TextColumn("业态类型", width="small"),
+                        "投资占比(%)": st.column_config.NumberColumn("投资占比(%)", format="%.2f", width="small"),
+                        "投资分类": st.column_config.TextColumn("投资分类", width="small"),
+                        "生效日期": st.column_config.TextColumn("生效日期", width="small"),
+                        "失效日期": st.column_config.TextColumn("失效日期", width="small"),
+                        "是否控制": st.column_config.TextColumn("是否控制", width="small"),
+                    },
+                )
             else:
                 st.info("暂无股权控制关系。")
         except Exception as exc:
@@ -6846,7 +6954,7 @@ def render_base_settings():
     active_tab = st.session_state.get("base_settings_active_tab", "首页")
     if active_tab not in tab_labels:
         active_tab = "首页"
-    tabs = st.tabs(tab_labels, default=active_tab, key="base_settings_tabs")
+    tabs = st.tabs(tab_labels, default=active_tab, key=f"base_settings_tabs_{active_tab}")
     with tabs[0]:
         _render_base_settings_home()
     with tabs[1]:

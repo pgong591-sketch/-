@@ -61,6 +61,16 @@ def test_sidebar_current_page_defaults_its_module_open():
     assert expanded["经营中心"] is False
 
 
+def test_sidebar_preserves_manual_collapse_of_current_module():
+    expanded = app._sidebar_expanded_state(
+        "base_settings.organization",
+        {"经营中心": True, "数据中心": False, "财务中心": False, "基础设置": False},
+    )
+
+    assert expanded["基础设置"] is False
+    assert expanded["经营中心"] is True
+
+
 def test_sidebar_legacy_pages_redirect_to_base_settings_keys():
     assert app._normalize_sidebar_page("基础设置") == "base_settings.overview"
     assert app._normalize_sidebar_page("公司层级") == "base_settings.organization"
@@ -87,6 +97,7 @@ def test_base_settings_entries_use_render_base_settings_and_default_tab():
     assert "base_settings_active_tab" in render_source
     assert "base_settings_active_tab" in base_source
     assert "default=active_tab" in base_source
+    assert 'key=f"base_settings_tabs_{active_tab}"' in base_source
     for key in BASE_SETTINGS_KEYS:
         assert f'"{key}": render_base_settings' in page_map_source
 
@@ -96,6 +107,20 @@ def test_no_single_module_pills_in_sidebar_source():
 
     assert "selection_mode=\"single\"" not in source
     assert "selection_mode='single'" not in source
+
+
+def test_sidebar_css_uses_larger_heavier_navigation_text():
+    css = app.PAGE_CSS
+
+    assert "[class*=\"st-key-nav_module_toggle_\"] button" in css
+    assert "font-size: 1rem !important;" in css
+    assert "font-weight: 800 !important;" in css
+    assert "[class*=\"st-key-nav_\"]:not([class*=\"st-key-nav_module_toggle_\"]) button" in css
+    assert "font-size: 0.92rem !important;" in css
+    assert "font-weight: 680 !important;" in css
+    assert ".nav-section-title" in css
+    assert "font-size: 0.78rem !important;" in css
+    assert "font-weight: 700 !important;" in css
 
 
 def test_startup_docs_do_not_hardcode_8501_for_sidebar_scope():
