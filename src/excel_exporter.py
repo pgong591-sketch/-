@@ -629,7 +629,7 @@ def export_income_statement_pivot(
     for ri, (_, row) in enumerate(pivot_df.iterrows()):
         excel_row = header_row + 1 + ri
         item_name = str(row.iloc[0]) if len(row) > 0 else ""
-        is_percent_row = "毛利" in item_name or "净利率" in item_name
+        is_percent_row = item_name in {"毛利率", "净利率"}
         for ci, col_name in enumerate(pivot_df.columns):
             val = row[col_name]
             cell = ws.cell(excel_row, ci + 1)

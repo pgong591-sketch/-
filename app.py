@@ -27,7 +27,14 @@ from src.reports import (
     get_non_subject_allocation, get_mgmt_dept_income_cost, get_non_subject_teaching_fee,
 )
 from src.models import REPORT_TYPES_CN
-from src.excel_exporter import export_to_excel, export_balance_sheet, export_income_statement, export_cashflow, export_account_balance
+from src.excel_exporter import (
+    export_to_excel,
+    export_balance_sheet,
+    export_income_statement,
+    export_income_statement_pivot,
+    export_cashflow,
+    export_account_balance,
+)
 from src.company_hierarchy import (
     get_company_tree, rebuild_tree_path, get_subtree, get_summary_report,
     import_companies_from_excel, get_company_info, get_company_list_for_summary,
@@ -92,22 +99,23 @@ st.set_page_config(page_title="财务数据仓库", page_icon="📊", layout="wi
 PAGE_CSS = """
 <style>
     :root {
-        --app-bg: #f4f6fb;
+        --app-bg: #f5f6fa;
         --surface: #ffffff;
-        --surface-soft: #f8fbff;
+        --surface-soft: #f8fafc;
         --text: #122033;
         --muted: #64748b;
-        --border: #cfd9e8;
-        --border-soft: #dce5f2;
+        --border: rgba(148, 163, 184, 0.38);
+        --border-soft: rgba(148, 163, 184, 0.24);
         --accent: #0a84ff;
         --accent-hover: #0071e3;
-        --accent-soft: #e8f2ff;
+        --accent-soft: rgba(10, 132, 255, 0.10);
         --ios-blue-soft: rgba(10, 132, 255, 0.12);
         --ios-fill: rgba(255, 255, 255, 0.82);
         --ios-fill-hover: rgba(255, 255, 255, 0.96);
         --ios-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
-        --table-head: #dceafe;
-        --table-band: #f7faff;
+        --ios-card-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+        --table-head: #eef6ff;
+        --table-band: #f8fbff;
         --success: #248a3d;
         --danger: #d92d20;
     }
@@ -340,35 +348,51 @@ PAGE_CSS = """
 
     .card {
         background: var(--surface);
-        border-radius: 8px;
+        border-radius: 12px;
         padding: 1.25rem;
         margin-bottom: 1rem;
-        box-shadow: none;
+        box-shadow: var(--ios-card-shadow);
         border: 1px solid var(--border-soft);
     }
 
     .home-filter-card {
         background: #ffffff;
-        border: 1px solid #d8e3f2;
-        border-radius: 8px;
+        border: 1px solid rgba(148, 163, 184, 0.24);
+        border-radius: 12px;
         padding: 0.7rem 0.78rem 0.58rem;
         margin-bottom: 0.8rem;
-        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+        box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
     }
 
     [class*="_filter_card"][data-testid="stVerticalBlockBorderWrapper"],
     [class*="_filter_card"] [data-testid="stVerticalBlockBorderWrapper"] {
-        background: #ffffff;
-        border: 1px solid var(--border-soft);
-        border-radius: 8px;
-        padding: 0.95rem 1rem 0.85rem;
+        background: rgba(255, 255, 255, 0.9);
+        border: 1px solid rgba(148, 163, 184, 0.24);
+        border-radius: 12px;
+        padding: 0.95rem 1rem 0.9rem;
         margin-bottom: 0.85rem;
-        box-shadow: none;
+        box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+        backdrop-filter: blur(14px);
     }
 
     [class*="_filter_card"][data-testid="stVerticalBlock"],
     [class*="_filter_card"] [data-testid="stVerticalBlock"] {
-        gap: 0.5rem;
+        gap: 0.48rem;
+    }
+
+    [class*="_filter_card"] label,
+    [class*="_filter_card"] [data-testid="stWidgetLabel"] p {
+        color: #475569 !important;
+        font-size: 0.78rem !important;
+        font-weight: 650 !important;
+    }
+
+    [class*="_filter_card"] div[data-baseweb="select"] > div,
+    [class*="_filter_card"] div[data-baseweb="input"] > div {
+        min-height: 2.36rem !important;
+        border-radius: 10px !important;
+        background: rgba(255, 255, 255, 0.94) !important;
+        border-color: rgba(148, 163, 184, 0.28) !important;
     }
 
     .workspace-filter-summary {
@@ -408,9 +432,9 @@ PAGE_CSS = """
     }
 
     .home-filter-title {
-        font-size: 0.86rem;
+        font-size: 0.9rem;
         color: #17345f;
-        font-weight: 720;
+        font-weight: 740;
         margin-bottom: 0.05rem;
         display: flex;
         align-items: center;
@@ -437,7 +461,7 @@ PAGE_CSS = """
     }
 
     .quick-filter-label {
-        color: #42526a;
+        color: #64748b;
         font-size: 0.76rem;
         font-weight: 650;
         padding-top: 0.38rem;
@@ -449,7 +473,8 @@ PAGE_CSS = """
     [class*="_filter_year_pills"],
     [class*="_filter_month_pills"],
     [class*="_filter_group_pills"] {
-        margin-left: -3.1rem !important;
+        margin-left: 0 !important;
+        padding-left: 0.12rem !important;
     }
 
     [class*="_filter_year_pills"] [data-testid^="stBaseButton"] p,
@@ -469,28 +494,32 @@ PAGE_CSS = """
     [class*="_filter_month_pills"] [data-testid^="stBaseButton"],
     [class*="_filter_group_pills"] [data-testid^="stBaseButton"] {
         border-radius: 999px !important;
-        border: 1px solid var(--border-soft) !important;
-        background: #f8fafc !important;
+        border: 1px solid rgba(148, 163, 184, 0.28) !important;
+        background: rgba(255, 255, 255, 0.9) !important;
         color: #334155 !important;
-        min-height: 2rem !important;
-        padding: 0.1rem 0.72rem !important;
+        min-height: 2.06rem !important;
+        padding: 0.1rem 0.78rem !important;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03) !important;
     }
 
     [class*="_filter_year_pills"] [kind="pillsActive"],
     [class*="_filter_month_pills"] [kind="pillsActive"],
     [class*="_filter_group_pills"] [kind="pillsActive"] {
-        background: rgba(0, 113, 227, 0.14) !important;
-        border-color: rgba(0, 113, 227, 0.35) !important;
-        color: #0f4f9d !important;
+        background: rgba(10, 132, 255, 0.13) !important;
+        border-color: rgba(10, 132, 255, 0.34) !important;
+        color: #0066cc !important;
+        box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.08) !important;
     }
 
+    [class*="_filter_year_pills"] div[role="radiogroup"],
+    [class*="_filter_month_pills"] div[role="radiogroup"],
     [class*="_filter_group_pills"] div[role="radiogroup"] {
         display: flex !important;
-        flex-wrap: nowrap !important;
-        overflow-x: auto !important;
+        flex-wrap: wrap !important;
+        overflow-x: visible !important;
         gap: 0.45rem !important;
+        row-gap: 0.38rem !important;
         padding-bottom: 0.1rem;
-        scrollbar-width: thin;
     }
 
     [class*="_filter_group_pills"] [data-testid^="stBaseButton"] {
@@ -523,18 +552,18 @@ PAGE_CSS = """
     }
 
     [class*="_summary_mode_pills"] [data-testid^="stBaseButton"] {
-        border-radius: 8px !important;
-        border: 1px solid rgba(37, 99, 235, 0.28) !important;
-        background: rgba(37, 99, 235, 0.08) !important;
-        color: #0f4f9d !important;
+        border-radius: 10px !important;
+        border: 1px solid rgba(10, 132, 255, 0.24) !important;
+        background: rgba(10, 132, 255, 0.08) !important;
+        color: #0066cc !important;
         min-height: 2.22rem !important;
         padding: 0.12rem 0.75rem !important;
     }
 
     [class*="_summary_mode_pills"] [kind="pillsActive"] {
-        background: rgba(37, 99, 235, 0.12) !important;
-        border-color: rgba(37, 99, 235, 0.35) !important;
-        color: #0f4f9d !important;
+        background: rgba(10, 132, 255, 0.14) !important;
+        border-color: rgba(10, 132, 255, 0.38) !important;
+        color: #0057b8 !important;
     }
 
     [class*="_summary_mode_pills"] [data-testid^="stBaseButton"] p {
@@ -546,21 +575,38 @@ PAGE_CSS = """
     [class*="_filter_apply"] button,
     [class*="_filter_reset"] button,
     [class*="_filter_toggle"] button {
-        min-height: 2.02rem !important;
-        border-radius: 7px !important;
+        min-height: 2.36rem !important;
+        border-radius: 10px !important;
         font-weight: 650 !important;
-        padding: 0.1rem 0.5rem !important;
-        font-size: 0.76rem !important;
-        margin-top: 1.8rem !important;
+        padding: 0.12rem 0.62rem !important;
+        font-size: 0.8rem !important;
+        margin-top: 1.55rem !important;
+        box-shadow: 0 4px 10px rgba(15, 23, 42, 0.04) !important;
     }
 
     [class*="_filter_apply"] button {
-        background: #0b74de !important;
-        border-color: #0b74de !important;
+        background: #0a84ff !important;
+        border-color: #0a84ff !important;
+        color: #ffffff !important;
+        box-shadow: 0 6px 14px rgba(10, 132, 255, 0.18) !important;
+    }
+
+    [class*="_filter_reset"] button,
+    [class*="_filter_toggle"] button {
+        background: rgba(255, 255, 255, 0.88) !important;
+        border-color: rgba(148, 163, 184, 0.28) !important;
+        color: #1f2a3d !important;
+    }
+
+    [class*="_filter_reset"] button:hover,
+    [class*="_filter_toggle"] button:hover {
+        background: rgba(10, 132, 255, 0.06) !important;
+        border-color: rgba(10, 132, 255, 0.28) !important;
+        color: #0b57cb !important;
     }
 
     [class*="_company_units"] [data-baseweb="select"] {
-        min-height: 2.02rem !important;
+        min-height: 2.36rem !important;
     }
 
     [class*="_company_units"] [data-baseweb="tag"] {
@@ -686,10 +732,10 @@ PAGE_CSS = """
 
     div[data-testid="stDataFrame"],
     div[data-testid="stDataEditor"] {
-        border-radius: 6px;
+        border-radius: 10px;
         overflow: hidden;
-        border: 1px solid #d5e1f0;
-        box-shadow: none;
+        border: 1px solid var(--border-soft);
+        box-shadow: var(--ios-shadow);
         background: #ffffff;
     }
 
@@ -700,10 +746,10 @@ PAGE_CSS = """
     div[data-testid="stDataFrame"] thead tr th {
         background: var(--table-head);
         color: #10233f;
-        font-weight: 700;
-        font-size: 0.78rem;
+        font-weight: 680;
+        font-size: 0.8rem;
         padding: 0.55rem 0.75rem;
-        border-bottom: 1px solid #bcd2ee;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.28);
     }
 
     div[data-testid="stDataFrame"] tbody tr:nth-child(even) {
@@ -714,14 +760,15 @@ PAGE_CSS = """
     div[data-testid="stDataEditor"] [role="columnheader"] {
         background: var(--table-head) !important;
         color: #10233f !important;
-        font-weight: 700 !important;
-        font-size: 0.78rem !important;
+        font-weight: 680 !important;
+        font-size: 0.8rem !important;
     }
 
     div[data-testid="stDataFrame"] [role="gridcell"],
     div[data-testid="stDataEditor"] [role="gridcell"] {
-        font-size: 0.78rem !important;
+        font-size: 0.82rem !important;
         color: #122033 !important;
+        font-variant-numeric: tabular-nums;
     }
 
     div[data-testid="stSelectbox"] label,
@@ -755,33 +802,38 @@ PAGE_CSS = """
     }
 
     .stTabs [data-baseweb="tab-list"] {
-        gap: 0.95rem;
-        border-bottom: 1px solid #d5e1f0;
+        gap: 0.42rem;
+        border-bottom: 1px solid var(--border-soft);
+        background: rgba(255,255,255,0.62);
+        border-radius: 10px 10px 0 0;
+        padding: 0.18rem 0.2rem 0;
     }
 
     .stTabs [data-baseweb="tab"] {
-        height: 2.35rem;
-        padding: 0 0.25rem;
+        height: 2.18rem;
+        padding: 0 0.72rem;
+        border-radius: 9px 9px 0 0;
         color: #42526a;
-        font-size: 0.84rem;
+        font-size: 0.82rem;
         font-weight: 620;
     }
 
     .stTabs [aria-selected="true"] {
         color: var(--accent) !important;
+        background: rgba(10, 132, 255, 0.10) !important;
         border-bottom: 2px solid var(--accent) !important;
     }
 
     div[data-testid="stFileUploader"] {
-        border-radius: 8px;
-        border: 1px dashed #b9b9c0;
-        background: #fbfbfd;
+        border-radius: 12px;
+        border: 1px dashed rgba(10, 132, 255, 0.32);
+        background: rgba(255,255,255,0.72);
         padding: 1rem;
     }
 
     div[data-testid="stFileUploader"]:hover {
         border-color: var(--accent);
-        background: #f7fbff;
+        background: rgba(10,132,255,0.06);
     }
 
     div[data-testid="stProgress"] > div {
@@ -4282,29 +4334,29 @@ def _operating_design_css() -> str:
     <style>
       :root{
         --primary:#0f5fd6;--sidebar-bg:#082b56;--sidebar-active:#1268d8;
-        --page-bg:#f5f7fb;--card-bg:#ffffff;--table-header-bg:#eaf2ff;
-        --summary-row-bg:#eef5ff;--profit-row-bg:#fff0f0;--danger:#f5222d;
+        --page-bg:#f5f6fa;--card-bg:#ffffff;--table-header-bg:#eef6ff;
+        --summary-row-bg:#f0f7ff;--profit-row-bg:#fff1f2;--danger:#f5222d;
         --success:#16a34a;--warning:#faad14;--border:#d9e2ef;
         --text-main:#10233f;--text-secondary:#5b6b82;
       }
       .profit-original-shell{margin-top:12px;color:var(--text-main);}
       .profit-original-action{
         display:grid;grid-template-columns:minmax(320px,1fr) auto;gap:12px;align-items:center;
-        background:var(--card-bg);border:1px solid var(--border);border-radius:8px;
-        padding:14px 16px;margin-bottom:12px;box-shadow:0 8px 22px rgba(16,35,63,.04);
+        background:rgba(255,255,255,.9);border:1px solid rgba(148,163,184,.24);border-radius:12px;
+        padding:14px 16px;margin-bottom:12px;box-shadow:0 1px 2px rgba(15,23,42,.05);
       }
-      .profit-original-meta-title{font-size:17px;font-weight:800;color:var(--text-main);line-height:1.3;}
+      .profit-original-meta-title{font-size:17px;font-weight:720;color:var(--text-main);line-height:1.3;}
       .profit-original-meta-sub{margin-top:6px;color:var(--text-secondary);font-size:12.5px;line-height:1.6;}
       .profit-original-meta-sub span{display:inline-flex;align-items:center;margin-right:14px;white-space:nowrap;}
       .profit-original-card{
-        background:var(--card-bg);border:1px solid var(--border);border-radius:8px;
-        overflow:visible;box-shadow:0 10px 24px rgba(16,35,63,.045);
+        background:var(--card-bg);border:1px solid rgba(148,163,184,.24);border-radius:12px;
+        overflow:visible;box-shadow:0 10px 28px rgba(15,23,42,.06);
       }
       .profit-original-card-head{
         display:flex;align-items:center;justify-content:space-between;gap:12px;
-        padding:12px 14px;border-bottom:1px solid var(--border);background:#fbfdff;
+        padding:12px 14px;border-bottom:1px solid rgba(148,163,184,.24);background:#fbfdff;
       }
-      .profit-original-card-title{font-size:15px;font-weight:800;color:var(--text-main);}
+      .profit-original-card-title{font-size:15px;font-weight:720;color:var(--text-main);}
       .profit-original-card-tip{font-size:12px;color:var(--text-secondary);}
       .profit-original-table-scroll{max-height:none;overflow:visible;background:#fff;}
       .profit-original-table{width:100%;min-width:0;border-collapse:separate;border-spacing:0;font-size:13px;table-layout:fixed;}
@@ -4318,19 +4370,19 @@ def _operating_design_css() -> str:
       .profit-original-table th:nth-child(8),.profit-original-table td:nth-child(8){width:17%;}
       .profit-original-table th{
         height:44px;background:var(--table-header-bg);
-        color:var(--text-main);font-size:13px;font-weight:700;text-align:center;
-        border-right:1px solid var(--border);border-bottom:1px solid var(--border);
+        color:var(--text-main);font-size:13px;font-weight:680;text-align:center;
+        border-right:1px solid rgba(148,163,184,.24);border-bottom:1px solid rgba(148,163,184,.24);
         padding:0 10px;white-space:nowrap;
       }
       .profit-original-table td{
-        height:42px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);
+        height:42px;border-right:1px solid rgba(148,163,184,.22);border-bottom:1px solid rgba(148,163,184,.22);
         padding:8px 10px;background:#fff;text-align:right;white-space:nowrap;
         color:var(--text-main);font-variant-numeric:tabular-nums;
       }
       .profit-original-table th:first-child,.profit-original-table td:first-child{
-        text-align:center;border-left:1px solid var(--border);
+        text-align:center;border-left:1px solid rgba(148,163,184,.24);
       }
-      .profit-original-table td:first-child{background:#fff;font-weight:700;}
+      .profit-original-table td:first-child{background:#fff;font-weight:650;}
       .profit-original-table tr:nth-child(even) td{background:#fbfdff;}
       .profit-original-table tr.summary-row td{background:var(--summary-row-bg);font-weight:800;}
       .profit-original-table tr.profit-row td{background:var(--profit-row-bg);color:var(--danger);font-weight:800;}
@@ -5825,6 +5877,412 @@ def render_balance_sheet():
             else:
                 st.error("无数据：请先导入资产负债表 Excel 或确保科目余额表有数据")
 
+INCOME_STATEMENT_FIXED_ITEMS = [
+    "一、营业收入",
+    "减：营业成本",
+    "毛利",
+    "毛利率",
+    "销售费用",
+    "管理费用",
+    "财务费用",
+    "税金及附加",
+    "加：投资收益（损失以“-”号填列）",
+    "二、营业利润（亏损以“-”号填列）",
+    "加：营业外收入",
+    "减：营业外支出",
+    "三、利润总额（亏损总额以“-”号填列）",
+    "减：所得税费用",
+    "四、净利润（净亏损以“-”号填列）",
+    "净利率",
+    "五、净利润（不含计提折旧与摊销）",
+    "加：折旧费",
+    "加：待摊费",
+    "折旧与摊销费合计",
+]
+INCOME_STATEMENT_PERCENT_ITEMS = {"毛利率", "净利率"}
+INCOME_STATEMENT_CORE_ITEMS = [
+    "一、营业收入",
+    "四、净利润（净亏损以“-”号填列）",
+    "毛利率",
+    "净利率",
+]
+INCOME_STATEMENT_FIXED_COMPANY_ORDER = [
+    "莞城小学部",
+    "莞城初中部",
+    "莞城高中部",
+    "莞城个性化",
+    "南城",
+    "石龙",
+    "万江",
+    "西平",
+    "厚街",
+    "石碣",
+    "虎门",
+    "石井",
+    "东泰",
+    "虎翼营",
+    "南城宏图",
+    "茶山学前",
+    "寮步石大",
+    "西平三和",
+    "南城虎翼",
+    "高埗",
+    "长安",
+    "拔创中心",
+    "书馆管理中心",
+    "尔遇书馆莞城",
+    "尔遇书馆西平",
+    "尔遇书馆东城",
+    "尔遇书馆金域",
+    "尔遇书馆星城",
+    "尔遇书馆龙景",
+    "尔遇书馆翡丽山",
+    "尔遇书馆西城楼",
+    "深圳卓越",
+    "东莞国际",
+    "管理中心",
+    "素质管理中心",
+    "探幽文旅",
+    "尔遇书城",
+    "多维学校",
+    "茶山幼儿园",
+    "茶山托育",
+    "少年宫",
+    "合并",
+]
+INCOME_STATEMENT_COMPANY_DISPLAY_ALIASES = {
+    "广东多维教育科技集团有限公司": "管理中心",
+}
+
+
+def get_income_statement_fixed_item_order() -> list[str]:
+    return list(INCOME_STATEMENT_FIXED_ITEMS)
+
+
+def get_income_statement_fixed_company_order() -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for name in INCOME_STATEMENT_FIXED_COMPANY_ORDER:
+        label = str(name or "").strip()
+        if label and label not in seen:
+            ordered.append(label)
+            seen.add(label)
+    return ordered
+
+
+def _income_statement_periods(year: str, months: list[str]) -> list[str]:
+    return [f"{year}{month}" for month in months]
+
+
+def _load_income_statement_rows(periods: list[str], use_cumulative: bool) -> pd.DataFrame:
+    if not periods:
+        return pd.DataFrame()
+    query_periods = [max(periods)] if use_cumulative else periods
+    value_col = "cumulative_value" if use_cumulative else "period1_value"
+    params = {f"period_{idx}": period for idx, period in enumerate(query_periods)}
+    placeholders = ", ".join(f":period_{idx}" for idx in range(len(query_periods)))
+    return execute_sql(
+        f"""
+        SELECT
+            ab.company_code,
+            COALESCE(NULLIF(TRIM(ab.original_name), ''), '') AS original_name,
+            COALESCE(NULLIF(TRIM(c.short_name), ''), '') AS short_name,
+            COALESCE(NULLIF(TRIM(c.name), ''), '') AS company_name,
+            COALESCE(NULLIF(TRIM(c.tree_path), ''), '') AS tree_path,
+            ab.item_name,
+            ab.sort_order,
+            ab.{value_col} AS statement_value
+        FROM income_statement ab
+        LEFT JOIN companies c ON ab.company_code = c.code
+        WHERE ab.period IN ({placeholders})
+        ORDER BY COALESCE(c.tree_path, ''), ab.company_code, ab.sort_order
+        """,
+        params,
+    )
+
+
+def _income_statement_company_label(row: dict) -> str:
+    for key in ("original_name", "short_name", "company_name", "company_code"):
+        value = str(row.get(key) or "").strip()
+        if value:
+            return INCOME_STATEMENT_COMPANY_DISPLAY_ALIASES.get(value, value)
+    return "未命名公司"
+
+
+def _income_statement_company_candidates(row: dict) -> set[str]:
+    candidates: set[str] = set()
+    for key in ("original_name", "short_name", "company_name", "company_code"):
+        value = str(row.get(key) or "").strip()
+        if value:
+            candidates.add(value)
+            candidates.add(INCOME_STATEMENT_COMPANY_DISPLAY_ALIASES.get(value, value))
+    return candidates
+
+
+def _income_statement_company_label_map(df: pd.DataFrame) -> dict[str, str]:
+    if df is None or df.empty:
+        return {}
+    records = []
+    for row in df.to_dict("records"):
+        records.append(
+            {
+                "company_code": str(row.get("company_code") or "").strip(),
+                "tree_path": str(row.get("tree_path") or "").strip(),
+                "label": _income_statement_company_label(row),
+                "candidates": _income_statement_company_candidates(row),
+            }
+        )
+    company_df = pd.DataFrame(records).drop_duplicates("company_code")
+    if company_df.empty:
+        return {}
+    company_df = company_df.sort_values(
+        by=["tree_path", "company_code"],
+        key=lambda series: series.astype(str),
+        kind="mergesort",
+    )
+    label_by_code: dict[str, str] = {}
+    used: set[str] = set()
+    for row in company_df.to_dict("records"):
+        company_code = str(row.get("company_code") or "").strip()
+        base_label = str(row.get("label") or company_code or "未命名公司").strip()
+        label = base_label
+        if label in used:
+            suffix = company_code or str(len(used) + 1)
+            label = f"{base_label}（{suffix}）"
+            counter = 2
+            while label in used:
+                label = f"{base_label}（{suffix}-{counter}）"
+                counter += 1
+        label_by_code[company_code] = label
+        used.add(label)
+    return label_by_code
+
+
+def _income_statement_company_order_from_label_map(
+    df: pd.DataFrame,
+    label_by_code: dict[str, str],
+) -> list[str]:
+    if not label_by_code:
+        return []
+    records = []
+    for row in df.to_dict("records"):
+        company_code = str(row.get("company_code") or "").strip()
+        if company_code in label_by_code:
+            records.append(
+                {
+                    "company_code": company_code,
+                    "tree_path": str(row.get("tree_path") or "").strip(),
+                    "label": label_by_code[company_code],
+                    "candidates": _income_statement_company_candidates(row),
+                }
+            )
+    company_df = pd.DataFrame(records).drop_duplicates("company_code")
+    if company_df.empty:
+        return list(label_by_code.values())
+    company_df = company_df.sort_values(
+        by=["tree_path", "company_code"],
+        key=lambda series: series.astype(str),
+        kind="mergesort",
+    )
+    fixed_names = get_income_statement_fixed_company_order()
+    labels: list[str] = []
+    used_codes: set[str] = set()
+    for fixed_name in fixed_names:
+        matches = company_df[
+            company_df.apply(
+                lambda row: fixed_name == row["label"] or fixed_name in row["candidates"],
+                axis=1,
+            )
+        ]
+        for row in matches.to_dict("records"):
+            company_code = str(row.get("company_code") or "").strip()
+            if company_code not in used_codes:
+                labels.append(str(row.get("label") or "").strip())
+                used_codes.add(company_code)
+    for row in company_df.to_dict("records"):
+        company_code = str(row.get("company_code") or "").strip()
+        if company_code not in used_codes:
+            labels.append(str(row.get("label") or "").strip())
+            used_codes.add(company_code)
+    return [label for label in labels if label]
+
+
+def get_income_statement_company_order(df: pd.DataFrame) -> list[str]:
+    label_by_code = _income_statement_company_label_map(df)
+    return _income_statement_company_order_from_label_map(df, label_by_code)
+
+
+def _income_statement_item_order(df: pd.DataFrame, available_items: set[str] | None = None) -> list[str]:
+    if df is None or df.empty:
+        return get_income_statement_fixed_item_order()
+    fixed = get_income_statement_fixed_item_order()
+    fixed_set = set(fixed)
+    present = available_items if available_items is not None else set(df["item_name"].dropna().astype(str))
+    ordered = [item for item in fixed if item in present]
+    extra_df = (
+        df.loc[~df["item_name"].astype(str).isin(fixed_set), ["item_name", "sort_order"]]
+        .copy()
+        .drop_duplicates("item_name")
+    )
+    if len(extra_df):
+        extra_df["sort_order"] = pd.to_numeric(extra_df["sort_order"], errors="coerce").fillna(999999)
+        extra_df = extra_df.sort_values(["sort_order", "item_name"], kind="mergesort")
+        ordered.extend(extra_df["item_name"].astype(str).tolist())
+    return ordered
+
+
+def _safe_income_statement_ratio(numerator, denominator) -> float:
+    denominator_value = _safe_float(denominator)
+    if abs(denominator_value) < 1e-9:
+        return 0.0
+    return _safe_float(numerator) / denominator_value
+
+
+def _income_statement_value_missing(value) -> bool:
+    if isinstance(value, str) and not value.strip():
+        return True
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _normalize_income_statement_statement_values(series: pd.Series) -> pd.Series:
+    cleaned = series.map(lambda value: pd.NA if _income_statement_value_missing(value) else value)
+    return pd.to_numeric(cleaned, errors="coerce")
+
+
+def _sum_income_statement_values(series: pd.Series):
+    return pd.to_numeric(series, errors="coerce").sum(min_count=1)
+
+
+def _complete_income_statement_ratio_rows(pivot: pd.DataFrame) -> pd.DataFrame:
+    if pivot is None or pivot.empty:
+        return pivot
+    completed = pivot.copy()
+    if "毛利率" not in completed.index and {"一、营业收入", "减：营业成本"}.issubset(completed.index):
+        completed.loc["毛利率"] = pd.NA
+    if "毛利率" in completed.index and {"一、营业收入", "减：营业成本"}.issubset(completed.index):
+        for column in completed.columns:
+            if not _income_statement_value_missing(completed.at["毛利率", column]):
+                continue
+            revenue = completed.at["一、营业收入", column]
+            cost = completed.at["减：营业成本", column]
+            if _income_statement_value_missing(revenue) or _income_statement_value_missing(cost):
+                continue
+            completed.at["毛利率", column] = _safe_income_statement_ratio(
+                _safe_float(revenue) - _safe_float(cost),
+                revenue,
+            )
+    if "净利率" not in completed.index and {"一、营业收入", "四、净利润（净亏损以“-”号填列）"}.issubset(completed.index):
+        completed.loc["净利率"] = pd.NA
+    if "净利率" in completed.index and {"一、营业收入", "四、净利润（净亏损以“-”号填列）"}.issubset(completed.index):
+        for column in completed.columns:
+            if not _income_statement_value_missing(completed.at["净利率", column]):
+                continue
+            revenue = completed.at["一、营业收入", column]
+            net_profit = completed.at["四、净利润（净亏损以“-”号填列）", column]
+            if _income_statement_value_missing(revenue) or _income_statement_value_missing(net_profit):
+                continue
+            completed.at["净利率", column] = _safe_income_statement_ratio(net_profit, revenue)
+    return completed
+
+
+def build_income_statement_pivot(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["项目"])
+    source = df.copy()
+    source["company_code"] = source["company_code"].astype(str).str.strip()
+    source["statement_value"] = _normalize_income_statement_statement_values(source["statement_value"])
+    label_by_code = _income_statement_company_label_map(source)
+    source["company_label"] = source["company_code"].map(label_by_code)
+    missing_label = source["company_label"].isna()
+    if missing_label.any():
+        source.loc[missing_label, "company_label"] = source.loc[missing_label].apply(
+            lambda row: _income_statement_company_label(row.to_dict()),
+            axis=1,
+        )
+    company_order = _income_statement_company_order_from_label_map(source, label_by_code)
+    pivot = source.pivot_table(
+        index="item_name",
+        columns="company_label",
+        values="statement_value",
+        aggfunc=_sum_income_statement_values,
+    )
+    pivot = _complete_income_statement_ratio_rows(pivot)
+    item_order = _income_statement_item_order(source, set(pivot.index.astype(str)))
+    pivot = pivot.reindex(item_order).fillna(0.0).reset_index().rename(columns={"item_name": "项目"})
+    columns = ["项目"] + [company for company in company_order if company in pivot.columns]
+    extra_columns = [column for column in pivot.columns if column not in columns]
+    return pivot[columns + extra_columns]
+
+
+def filter_income_statement_display_rows(pivot: pd.DataFrame, compact_view: bool = False) -> pd.DataFrame:
+    if pivot is None or pivot.empty or not compact_view:
+        return pivot
+    core_items = [item for item in INCOME_STATEMENT_CORE_ITEMS if item in set(pivot["项目"].astype(str))]
+    return pivot.loc[pivot["项目"].astype(str).isin(core_items)].set_index("项目").reindex(core_items).reset_index()
+
+
+def _format_income_statement_value(item_name: str, value: object) -> str:
+    number = _safe_float(value)
+    if item_name in INCOME_STATEMENT_PERCENT_ITEMS:
+        return f"{number * 100:.2f}%"
+    return f"{number:,.2f}"
+
+
+def format_income_statement_display(pivot: pd.DataFrame) -> pd.DataFrame:
+    if pivot is None or pivot.empty:
+        return pd.DataFrame(columns=["项目"])
+    display = pivot.copy().astype(object)
+    for idx, row in display.iterrows():
+        item_name = str(row.get("项目") or "")
+        for column in display.columns:
+            if column == "项目":
+                continue
+            display.at[idx, column] = _format_income_statement_value(item_name, row.get(column))
+    return display
+
+
+def _income_statement_table_html(display_df: pd.DataFrame, value_df: pd.DataFrame | None = None) -> str:
+    if display_df is None or display_df.empty:
+        return '<div class="income-statement-empty">暂无损益表数据。</div>'
+    header_html = "".join(f"<th>{_html(column)}</th>" for column in display_df.columns)
+    body = []
+    value_records = value_df.to_dict("records") if value_df is not None and not value_df.empty else []
+    for row_idx, row in enumerate(display_df.to_dict("records")):
+        cells = []
+        item_name = str(row.get("项目") or "")
+        value_row = value_records[row_idx] if row_idx < len(value_records) else {}
+        for idx, column in enumerate(display_df.columns):
+            cls = "item-cell" if idx == 0 else "amount-cell"
+            if (
+                idx > 0
+                and item_name in INCOME_STATEMENT_PERCENT_ITEMS
+                and _safe_float(value_row.get(column)) < 0
+            ):
+                cls += " negative-rate-cell"
+            cells.append(f'<td class="{cls}">{_html(row.get(column, ""))}</td>')
+        body.append(f"<tr>{''.join(cells)}</tr>")
+    return f"""
+    <style>
+      .income-statement-scroll{{overflow-x:auto;width:100%;}}
+      .income-statement-table{{border-collapse:collapse;min-width:1160px;width:max-content;background:white;}}
+      .income-statement-table th,.income-statement-table td{{border:1px solid #d9e2ef;padding:9px 10px;font-size:14px;line-height:1.35;}}
+      .income-statement-table th{{background:#eaf2ff;color:#10233f;text-align:center;font-weight:700;white-space:normal;}}
+      .income-statement-table .item-cell{{min-width:320px;max-width:420px;white-space:normal;word-break:break-word;text-align:left;font-weight:600;}}
+      .income-statement-table .amount-cell{{min-width:145px;text-align:right;white-space:nowrap;}}
+      .income-statement-table .negative-rate-cell{{color:#b42318;background:#fff1f0;font-weight:800;}}
+    </style>
+    <div class="income-statement-scroll">
+      <table class="income-statement-table">
+        <thead><tr>{header_html}</tr></thead>
+        <tbody>{''.join(body)}</tbody>
+      </table>
+    </div>
+    """
+
+
 def render_income_statement():
     st.markdown('<div class="page-header">📈 损益表</div>', unsafe_allow_html=True)
     years, months = _get_year_month_options()
@@ -5840,6 +6298,12 @@ def render_income_statement():
     with c3:
         st.markdown("<div style='padding-top:28px;'></div>", unsafe_allow_html=True)
         all_months = st.checkbox("📅 全选（全年累计）", value=False, key="is_all")
+    compact_view = st.checkbox(
+        "只看核心指标",
+        value=st.session_state.get("income_statement_compact_view", False),
+        key="income_statement_compact_view",
+        help="仅显示营业收入、净利润、毛利率、净利率；导出跟随当前显示内容。",
+    )
     # 全选时覆盖月份
     if all_months:
         sel_months = months
@@ -5847,71 +6311,20 @@ def render_income_statement():
     if st.button("查询报表", type="primary", icon=":material/monitoring:", use_container_width=True):
         if not sel_year or not sel_months:
             st.toast("请选择年份和月份", icon="⚠️"); return
-        sel_periods = [f"{sel_year}{m}" for m in sel_months]
+        sel_periods = _income_statement_periods(sel_year, sel_months)
 
         with st.spinner("⏳ 查询中..."):
-            period_ph = ",".join([f"'{p}'" for p in sel_periods])
-            df = execute_sql(f"""
-                SELECT COALESCE(ab.original_name, c.name, ab.company_code) AS original_name,
-                       ab.item_name,
-                       CASE WHEN :is_all = 1 THEN ab.cumulative_value ELSE ab.period1_value END AS period1_value,
-                       ab.sort_order
-                FROM income_statement ab
-                LEFT JOIN companies c ON ab.company_code = c.code
-                WHERE ab.period IN ({period_ph})
-                ORDER BY ab.sort_order
-            """, {"is_all": 1 if all_months else 0})
+            df = _load_income_statement_rows(sel_periods, use_cumulative=all_months)
         if len(df) > 0:
             st.toast(f"已找到损益表数据", icon="✅")
-            df["row_idx"] = df["sort_order"] // 1000
-            # 透视：行=科目名，列=原始公司名
-            pivot = df.pivot_table(
-                index=["item_name", "row_idx"],
-                columns="original_name",
-                values="period1_value",
-                aggfunc="sum"
-            ).fillna(0).reset_index()
-            pivot = pivot.sort_values("row_idx").drop(columns="row_idx")
-            pivot = pivot.rename(columns={"item_name": "项目"})
-
-            # 固定模板列顺序
-            col_order = ["项目"]
-            for c in df.sort_values("sort_order")["original_name"].unique():
-                if c in pivot.columns:
-                    col_order.append(c)
-            pivot = pivot[[c for c in col_order if c in pivot.columns]]
-
-            # 毛利/净利率行数值 ×100 并转为百分比字符串
-            pct_items = pivot["项目"].str.contains("毛利|净利率", na=False)
-            for col in pivot.columns:
-                if col != "项目":
-                    pivot[col] = pd.to_numeric(pivot[col], errors="coerce").fillna(0).astype(object)
-                    for idx in pivot.index:
-                        val = pivot.at[idx, col]
-                        if pct_items[idx]:
-                            v = float(val) * 100
-                            pivot.at[idx, col] = f"{v:.0f}%" if abs(v - round(v)) < 0.001 else f"{v:.1f}%"
-                        else:
-                            pivot.at[idx, col] = f"{float(val):,.2f}"
-
-            # 配置列格式（全部用TextColumn）
-            col_config = {"项目": st.column_config.TextColumn("项目", width="medium")}
-            for c in pivot.columns:
-                if c != "项目":
-                    col_config[c] = st.column_config.TextColumn(c, width="small")
-
-            # 配置列格式
-            col_config = {"项目": st.column_config.TextColumn("项目", width="medium")}
-            for c in pivot.columns:
-                if c != "项目":
-                    col_config[c] = st.column_config.NumberColumn(c, format="%,.2f")
-
-            st.dataframe(pivot, use_container_width=True, hide_index=True, height=600,
-                         column_config=col_config)
+            pivot = build_income_statement_pivot(df)
+            visible_pivot = filter_income_statement_display_rows(pivot, compact_view)
+            display = format_income_statement_display(visible_pivot)
+            st.markdown(_income_statement_table_html(display, visible_pivot), unsafe_allow_html=True)
 
             # 导出 Excel（按模板格式）
             with st.spinner("⏳ 生成导出文件..."):
-                fpath = export_income_statement_pivot(pivot, sel_year)
+                fpath = export_income_statement_pivot(display, sel_year)
                 excel_bytes = _read_export_bytes(fpath)
             st.download_button(
                 "📥 导出 Excel",
