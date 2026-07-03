@@ -26,6 +26,27 @@ from .operating_summary import SUMMARY_ITEM_ORDER
 ALL_COMPANIES_VALUE = ""
 BASE_OPERATING_ITEM_ALIASES = {"差旅交际费": "交际费"}
 COMPANY_HIERARCHY_ROOT_CODE = "__ROOT__"
+BUDGET_CAMPUS_NAME_MAPPINGS: dict[str, tuple[str, ...]] = {
+    "东城石井校区": ("石井",),
+    "初中总部校区": ("莞城初中部",),
+    "初中总部虎翼营": ("虎翼营",),
+    "厚街校区&厚街虎翼": ("厚街",),
+    "宏图校区": ("南城宏图",),
+    "寮步校区": ("寮步石大",),
+    "小学总部校区": ("莞城小学部",),
+    "西平小初校区": ("西平",),
+    "长安地王校区": ("长安",),
+    "高中总部校区": ("莞城高中部",),
+    "高埗广北校区": ("高埗",),
+    "南城虎翼营": ("南城虎翼",),
+    "茶山校区": ("茶山学前",),
+    # 用户确认口径是“华凯校区 -> 南城校区”；当前实际报表名称为“南城”。
+    "华凯校区": ("南城校区", "南城"),
+}
+BUDGET_CAMPUS_SPECIAL_STATUSES: dict[str, tuple[str, str]] = {
+    "松山湖校区": ("待开业", "用户确认：还没正式开业，后续会对应上"),
+    "产品中心直营校": ("已取消", "用户确认：该项目取消，预算目标保留"),
+}
 
 
 def _clean(value: Any) -> str:
@@ -269,6 +290,40 @@ def normalize_operating_item(value: Any) -> str:
     item = _clean(value)
     normalized = BASE_OPERATING_ITEM_ALIASES.get(item, item)
     return normalized if normalized in SUMMARY_ITEM_ORDER else normalized
+
+
+def get_budget_campus_name_mappings() -> dict[str, tuple[str, ...]]:
+    """Return reusable budget-campus-name mappings for budget, course and result modules."""
+    return dict(BUDGET_CAMPUS_NAME_MAPPINGS)
+
+
+def get_budget_campus_special_statuses() -> dict[str, tuple[str, str]]:
+    """Return special budget-campus statuses that should not be treated as zero actuals."""
+    return dict(BUDGET_CAMPUS_SPECIAL_STATUSES)
+
+
+def get_budget_campus_mapping_records() -> pd.DataFrame:
+    """Return a display-ready mapping list for Base Settings > naming/profile pages."""
+    rows: list[dict[str, str]] = []
+    for budget_name, actual_names in BUDGET_CAMPUS_NAME_MAPPINGS.items():
+        rows.append(
+            {
+                "预算校区名称": budget_name,
+                "系统实际名称": " / ".join(actual_names),
+                "状态": "已确认",
+                "说明": "预算校区名称映射到系统实际经营单位/校区名称",
+            }
+        )
+    for budget_name, (status, note) in BUDGET_CAMPUS_SPECIAL_STATUSES.items():
+        rows.append(
+            {
+                "预算校区名称": budget_name,
+                "系统实际名称": "",
+                "状态": status,
+                "说明": note,
+            }
+        )
+    return pd.DataFrame(rows, columns=["预算校区名称", "系统实际名称", "状态", "说明"])
 
 
 def _safe_int(value: Any, default: int = 0) -> int:

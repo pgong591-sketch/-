@@ -9,6 +9,7 @@ from pathlib import Path
 from html import escape
 from math import ceil
 from numbers import Number
+from urllib.parse import quote
 from xml.sax.saxutils import escape as xml_escape
 import streamlit as st
 import streamlit.components.v1 as components
@@ -80,6 +81,9 @@ from src.base_settings_service import (
     detect_company_hierarchy_issues,
     get_base_health_checks,
     get_base_settings_overview,
+    get_budget_campus_mapping_records,
+    get_budget_campus_name_mappings,
+    get_budget_campus_special_statuses,
     get_default_expanded_company_codes,
     resolve_company_identity,
 )
@@ -1864,7 +1868,7 @@ def _alerts_html(anomalies: list[dict]) -> str:
 
 NAV_MODULE_SECTIONS = {
     "经营中心": {
-        "经营看板": ["首页", "利润表总览驾驶舱", "利润表明细（原表）", "费用科目分析", "多维图片简报", "多期对比"],
+        "经营看板": ["首页", "全面预算", "利润表明细（原表）", "费用科目分析", "多维图片简报", "多期对比"],
         "经营测算": ["盈亏平衡测算"],
     },
     "数据中心": {
@@ -1914,6 +1918,7 @@ NAV_LABELS = {
     "利润表总览驾驶舱": "利润驾驶舱",
     "利润表明细（原表）": "经营汇总表",
     "费用科目分析": "费用分析",
+    "全面预算": "全面预算",
     "合并报表": "合并报表",
     "多期对比": "多期对比",
     "盈亏平衡测算": "盈亏平衡测算",
@@ -1978,6 +1983,8 @@ def render_sidebar():
         st.markdown("---")
         module_sections = NAV_MODULE_SECTIONS
         labels = NAV_LABELS
+        if _get_query_param("budget_drill"):
+            st.session_state.nav_choice = "全面预算"
         current = _normalize_sidebar_page(st.session_state.get("nav_choice", "首页"))
         if st.session_state.get("nav_choice") != current:
             st.session_state.nav_choice = current
@@ -5103,118 +5110,252 @@ def _build_operating_original_rows_for_scope(
     return build_operating_summary_rows(source_df, previous_source_df)
 
 
-def render_expense_subject_analysis():
-    ctx = _profit_page_context(
-        "expense_subject",
-        "费用科目分析",
-        "财务主管按费用科目定位异常、备注、数据来源和近 6 个月趋势。",
+EXPENSE_FOCUS_CATEGORY_RULES = [
+    {
+        "category": "人工成本",
+        "items": {"工资", "奖金", "社保费", "社保", "公积金", "福利费", "教师福利", "劳务费", "招聘费"},
+        "status": lambda cost_ratio, revenue_ratio: "人工成本占比较高，优先复核排班、课酬和社保口径。" if cost_ratio >= 0.6 else "人工成本为最大成本项，保持月度跟踪。",
+    },
+    {
+        "category": "租金水电物业",
+        "items": {"房租", "水电费", "物业管理费"},
+        "status": lambda cost_ratio, revenue_ratio: "固定大项压力偏高，建议复核校区面积和能耗。" if cost_ratio >= 0.1 else "固定大项压力可控，关注异常校区。",
+    },
+    {
+        "category": "折旧摊销",
+        "items": {"折旧费", "待摊费"},
+        "status": lambda cost_ratio, revenue_ratio: "折旧摊销压力需关注，避免与合计行重复统计。" if cost_ratio >= 0.06 else "按折旧费和待摊费明细统计，未叠加合计行。",
+    },
+    {
+        "category": "交际接待交通",
+        "items": {"招待费", "交际费", "市内交通费", "差旅费", "汽车费"},
+        "status": lambda cost_ratio, revenue_ratio: "波动费用偏高，建议查看主要经营单位。" if cost_ratio >= 0.03 else "波动费用未见明显失控。",
+    },
+    {
+        "category": "办公行政",
+        "items": {"办公费", "通信费", "网络服务费", "维修费", "培训费", "保险费", "中介服务费"},
+        "status": lambda cost_ratio, revenue_ratio: "办公行政费用偏高，建议拆看维修、培训和中介服务。" if cost_ratio >= 0.03 else "办公行政支出整体可控。",
+    },
+    {
+        "category": "财务费用",
+        "items": {"手续费", "利息收入", "利息支出"},
+        "status": lambda cost_ratio, revenue_ratio: "资金成本需关注，建议复核手续费和利息项目。" if cost_ratio >= 0.02 else "财务费用占比较低。",
+    },
+]
+EXPENSE_MANAGEMENT_FEE_ITEMS = {"管理费服务费"}
+EXPENSE_DENOMINATOR_ITEMS = {"成本费用合计", "收入合计"}
+
+
+def _is_income_cost_detail_row(row: dict) -> bool:
+    account_code = str(row.get("account_code") or "").strip()
+    return not (account_code.startswith("OPERATING_") or account_code.startswith("SUMMARY_"))
+
+
+def _preferred_expense_denominator(source_df: pd.DataFrame, item_name: str) -> float:
+    if source_df is None or source_df.empty:
+        return 0.0
+    rows = source_df[source_df["source_item_name"].astype(str).str.strip() == item_name].copy()
+    if rows.empty:
+        return 0.0
+    rows["source_priority"] = rows["account_code"].astype(str).map(
+        lambda value: 0 if value.startswith("OPERATING_") else 1 if value.startswith("SUMMARY_") else 2
     )
-    if not ctx:
-        return
-    rows = _operating_table_rows(ctx["detail_df"], ctx["previous_detail_df"])
-    subjects = [row["费用科目"] for row in rows] or ["暂无科目"]
-    left, middle, right = st.columns([0.82, 1.75, 1.18], gap="large")
-    with left:
-        st.markdown('<div class="home-filter-title">费用科目树</div>', unsafe_allow_html=True)
-        selected_subject = st.radio(
-            "费用科目树",
-            subjects,
-            label_visibility="collapsed",
-            key="expense_subject_tree",
+    selected = []
+    for _, group in rows.groupby("company_code", dropna=False):
+        best = group[group["source_priority"] == group["source_priority"].min()]
+        selected.append(best.tail(1))
+    if not selected:
+        return 0.0
+    selected_df = pd.concat(selected, ignore_index=True)
+    return _safe_float(pd.to_numeric(selected_df["current_amount"], errors="coerce").fillna(0.0).sum())
+
+
+def _expense_ratio(amount: float, denominator: float) -> float:
+    denominator = _safe_float(denominator)
+    if abs(denominator) < 1e-9:
+        return 0.0
+    return _safe_float(amount) / denominator
+
+
+def build_focus_expense_analysis(source_df: pd.DataFrame) -> dict:
+    if source_df is None or source_df.empty:
+        empty = pd.DataFrame(columns=["费用类别", "本月金额", "占成本费用比", "占收入比", "状态说明"])
+        return {
+            "categories": empty,
+            "ranking": pd.DataFrame(columns=["费用类别", "主要经营单位", "本月金额", "占比", "判断"]),
+            "management_fee": {"amount": 0.0, "cost_ratio": 0.0, "revenue_ratio": 0.0},
+            "cost_total": 0.0,
+            "revenue_total": 0.0,
+            "conclusion": "当前期间暂无收入成本费用明细表数据。",
+        }
+
+    source = source_df.copy()
+    for column in ["source_item_name", "company_name", "company_code", "account_code"]:
+        if column not in source.columns:
+            source[column] = ""
+    if "current_amount" not in source.columns:
+        source["current_amount"] = 0.0
+    source["source_item_name"] = source["source_item_name"].astype(str).str.strip()
+    source["current_amount"] = pd.to_numeric(source["current_amount"], errors="coerce").fillna(0.0)
+    cost_total = _preferred_expense_denominator(source, "成本费用合计")
+    revenue_total = _preferred_expense_denominator(source, "收入合计")
+    detail = source[source.apply(lambda row: _is_income_cost_detail_row(row.to_dict()), axis=1)].copy()
+
+    category_rows = []
+    ranking_rows = []
+    for rule in EXPENSE_FOCUS_CATEGORY_RULES:
+        matched = detail[detail["source_item_name"].isin(rule["items"])].copy()
+        amount = _safe_float(matched["current_amount"].sum()) if len(matched) else 0.0
+        cost_ratio = _expense_ratio(amount, cost_total)
+        revenue_ratio = _expense_ratio(amount, revenue_total)
+        status = rule["status"](cost_ratio, revenue_ratio)
+        category_rows.append(
+            {
+                "费用类别": rule["category"],
+                "本月金额": amount,
+                "占成本费用比": cost_ratio,
+                "占收入比": revenue_ratio,
+                "状态说明": status,
+            }
         )
-    selected_row = next((row for row in rows if row["费用科目"] == selected_subject), rows[0] if rows else None)
-    with middle:
-        st.markdown('<div class="home-filter-title">科目明细表</div>', unsafe_allow_html=True)
-        if not rows:
-            st.info("暂无费用科目数据。")
+        if len(matched):
+            by_company = (
+                matched.groupby(["company_code", "company_name"], dropna=False)["current_amount"]
+                .sum()
+                .reset_index()
+                .sort_values("current_amount", ascending=False, kind="mergesort")
+            )
+            top = by_company.iloc[0].to_dict()
+            ranking_rows.append(
+                {
+                    "费用类别": rule["category"],
+                    "主要经营单位": str(top.get("company_name") or top.get("company_code") or "未识别"),
+                    "本月金额": _safe_float(top.get("current_amount")),
+                    "占比": _expense_ratio(top.get("current_amount"), amount),
+                    "判断": status,
+                }
+            )
         else:
-            detail_rows = []
-            for row in rows:
-                detail_rows.append(
-                    {
-                        "费用科目": row["费用科目"],
-                        "本月": row["2026合计"],
-                        "占费用比": _safe_float(row["占费用比"]) * 100,
-                        "占收入比": _safe_float(row["占收入比"]) * 100,
-                        "环比": _safe_float(row["环比"]) * 100 if row["环比"] is not None else None,
-                        "异常说明": row["备注"],
-                    }
-                )
-            st.dataframe(
-                pd.DataFrame(detail_rows),
-                use_container_width=True,
-                hide_index=True,
-                height=520,
-                column_config={
-                    "本月": st.column_config.NumberColumn("本月", format="%,.2f"),
-                    "占费用比": st.column_config.NumberColumn("占费用比", format="%.1f%%"),
-                    "占收入比": st.column_config.NumberColumn("占收入比", format="%.1f%%"),
-                    "环比": st.column_config.NumberColumn("环比", format="%.1f%%"),
-                },
+            ranking_rows.append(
+                {
+                    "费用类别": rule["category"],
+                    "主要经营单位": "-",
+                    "本月金额": 0.0,
+                    "占比": 0.0,
+                    "判断": "未匹配到该类费用明细。",
+                }
             )
-            drill_col, source_col = st.columns(2)
-            with drill_col:
-                if st.button("查看金额明细", type="primary", use_container_width=True):
-                    st.session_state["expense_show_detail"] = True
-            with source_col:
-                if st.button("查看来源", use_container_width=True):
-                    st.session_state["expense_show_sources"] = True
-            if st.session_state.get("expense_show_detail") and selected_row:
-                with st.expander("金额明细", expanded=True):
-                    amount_detail = pd.DataFrame(
-                        [
-                            ["统计期间", ctx["period"]],
-                            ["组织主体", ctx["scope_label"]],
-                            ["费用科目", selected_row["费用科目"]],
-                            ["当前金额", f"{_safe_float(selected_row['2026合计']):,.2f}"],
-                            ["数据来源", "Excel导入 / 系统计算"],
-                            ["导入批次号", "IMP-202603-001"],
-                            ["原始文件名", "2026年损益表.xlsx"],
-                            ["原始 Sheet 名", "损益表"],
-                            ["原始行号", "12"],
-                            ["原始列名", "2026合计"],
-                            ["原始单元格位置", "H12"],
-                            ["原始金额", f"{_safe_float(selected_row['2026合计']):,.2f}"],
-                            ["调整金额", "0.00"],
-                            ["最终金额", f"{_safe_float(selected_row['2026合计']):,.2f}"],
-                            ["备注", selected_row["备注"] or "Excel导入"],
-                            ["操作人", "系统导入"],
-                            ["更新时间", "2026-03-31 23:59:59"],
-                        ],
-                        columns=["字段", "内容"],
-                    )
-                    st.table(amount_detail)
-    with right:
-        st.markdown('<div class="home-filter-title">分析辅助区</div>', unsafe_allow_html=True)
-        with st.container(border=True):
-            st.markdown("**异常提醒**")
-            if ctx["alerts"]:
-                for item in ctx["alerts"]:
-                    st.warning(item.get("text", ""))
-            else:
-                st.success("当前范围未发现明显异常。")
-        with st.container(border=True):
-            st.markdown("**备注模板**")
-            st.button("需要追溯导入来源/项目明细", use_container_width=True)
-            st.button("水电费可单独标注异常", use_container_width=True)
-            st.button("建议拆工资/社保/绩效", use_container_width=True)
-        with st.container(border=True):
-            st.markdown("**数据来源**")
-            source_rows = pd.DataFrame(
-                [
-                    ["Excel导入", "IMP-202603-001", "2026年损益表.xlsx", "损益表!H12", 1231653.00, "查看来源"],
-                    ["手工调整", "ADJ-202603-002", "-", "人工录入", -20000.00, "查看来源"],
-                    ["系统计算", "CALC-202603-001", "-", "成本费用合计公式", 24888280.24, "查看来源"],
-                ],
-                columns=["来源类型", "导入批次", "原始文件", "原表位置", "金额", "操作"],
-            )
-            st.table(source_rows)
-        with st.container(border=True):
-            st.markdown("**近 6 个月趋势**")
-            if len(ctx["trend_df"]):
-                st.line_chart(ctx["trend_df"].set_index("期间")[["收入合计", "成本费用合计", "净利润"]])
-            else:
-                st.info("暂无趋势数据。")
+
+    management_rows = detail[detail["source_item_name"].isin(EXPENSE_MANAGEMENT_FEE_ITEMS)].copy()
+    management_amount = _safe_float(management_rows["current_amount"].sum()) if len(management_rows) else 0.0
+    categories = pd.DataFrame(category_rows)
+    ranking = pd.DataFrame(ranking_rows)
+    top_external = categories.sort_values("本月金额", ascending=False, kind="mergesort").head(2)
+    top_text = "、".join(
+        f"{row['费用类别']}占成本费用{_safe_float(row['占成本费用比']) * 100:.1f}%"
+        for row in top_external.to_dict("records")
+    )
+    management_text = (
+        f"管理费服务费{_fmt_money_compact(management_amount)}需按合并口径单独提示"
+        if abs(management_amount) > 1e-9
+        else "管理费服务费本期未匹配到明细"
+    )
+    return {
+        "categories": categories,
+        "ranking": ranking,
+        "management_fee": {
+            "amount": management_amount,
+            "cost_ratio": _expense_ratio(management_amount, cost_total),
+            "revenue_ratio": _expense_ratio(management_amount, revenue_total),
+        },
+        "cost_total": cost_total,
+        "revenue_total": revenue_total,
+        "conclusion": f"本月费用重点：{top_text}，{management_text}。",
+    }
+
+
+def _render_focus_expense_cards(categories: pd.DataFrame) -> None:
+    cards: list[str] = []
+    for row in categories.to_dict("records"):
+        cards.append(
+            '<div class="focus-expense-card">'
+            f'<div class="focus-expense-title">{_html(row["费用类别"])}</div>'
+            f'<div class="focus-expense-value">{_html(_fmt_money_compact(row["本月金额"]))}</div>'
+            f'<div class="focus-expense-meta">占成本费用 {_safe_float(row["占成本费用比"]) * 100:.1f}% · 占收入 {_safe_float(row["占收入比"]) * 100:.1f}%</div>'
+            f'<div class="focus-expense-note">{_html(row["状态说明"])}</div>'
+            "</div>"
+        )
+    _render_html(
+        """
+        <style>
+          .focus-expense-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:12px 0 18px;}
+          .focus-expense-card{background:#fff;border:1px solid #d9e4f2;border-radius:14px;padding:16px;box-shadow:0 8px 20px rgba(15,35,65,.06);}
+          .focus-expense-title{font-size:15px;font-weight:800;color:#10233f;margin-bottom:8px;}
+          .focus-expense-value{font-size:22px;font-weight:850;color:#1f6feb;margin-bottom:8px;}
+          .focus-expense-meta{font-size:13px;color:#5c6f8a;line-height:1.45;}
+          .focus-expense-note{font-size:13px;color:#17233b;margin-top:10px;line-height:1.45;}
+          @media (max-width: 980px){.focus-expense-grid{grid-template-columns:1fr;}}
+        </style>
+        """
+        f'<div class="focus-expense-grid">{"".join(cards)}</div>'
+    )
+
+
+def render_expense_subject_analysis():
+    st.markdown('<div class="page-header">重点费用分析</div>', unsafe_allow_html=True)
+    periods = get_operating_summary_periods() or get_dashboard_periods()
+    if not periods:
+        st.info("暂无可展示期间。请先导入收入成本费用明细表。")
+        return
+    filters = _render_workspace_filter_bar(
+        key_prefix="expense_subject",
+        periods=periods,
+        summary_mode_options=["默认公司", "集团汇总", "板块汇总"],
+        group_options=_get_business_group_options(),
+        title="筛选区",
+        period_mode="single",
+        note="数据来源：收入成本费用表明细。管理费服务费属于内部管理收费，本页单独提示，不与外部费用混看。",
+    )
+    period = filters["period"]
+    company_codes = _resolve_filter_company_codes(filters)
+    scope_label = _workspace_scope_label(filters)
+    source_df = get_operating_summary_source_detail(period, company_codes)
+    analysis = build_focus_expense_analysis(source_df)
+
+    st.info(analysis["conclusion"])
+    if source_df.empty:
+        st.warning("当前范围暂无收入成本费用明细。")
+        return
+
+    st.markdown("### 六类重点费用")
+    _render_focus_expense_cards(analysis["categories"])
+
+    st.markdown("### 重点费用单位排行")
+    ranking_display = analysis["ranking"].copy()
+    if len(ranking_display):
+        ranking_display["占比"] = ranking_display["占比"].map(lambda value: _safe_float(value) * 100)
+    st.dataframe(
+        ranking_display,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "本月金额": st.column_config.NumberColumn("本月金额", format="%,.2f"),
+            "占比": st.column_config.NumberColumn("占比", format="%.1f%%"),
+        },
+    )
+
+    management = analysis["management_fee"]
+    st.markdown("### 口径提醒")
+    with st.container(border=True):
+        st.markdown(
+            f"""
+            **管理费服务费** {_fmt_money_compact(management["amount"])}，
+            占成本费用 {_safe_float(management["cost_ratio"]) * 100:.1f}%、
+            占收入 {_safe_float(management["revenue_ratio"]) * 100:.1f}%。
+            该项目属于内部管理收费，合并口径下后续需要抵消，不与外部经营费用混看。
+            """
+        )
+        st.caption(f"当前范围：{scope_label} · 期间：{period} · 分母优先使用收入成本费用表中的成本费用合计和收入合计。")
 
 
 def render_multi_operating_summary():
@@ -5954,6 +6095,54 @@ INCOME_STATEMENT_COMPANY_DISPLAY_ALIASES = {
     "广东多维教育科技集团有限公司": "管理中心",
 }
 
+BUDGET_VERSION = "2026年集团预算"
+BUDGET_WORKBOOK_PATH = Path(
+    os.environ.get(
+        "FINANCE_DW_BUDGET_WORKBOOK",
+        str(Path(__file__).resolve().parent / "data" / "2026年集团预算.xlsx"),
+    )
+)
+BUDGET_SHEET_NAME = "2025年总预算（各部门提交）"
+BUDGET_QUALITY_CENTER_SHEET_NAME = "2026年素质中心目标校区四季度营收(含个性化)"
+BUDGET_MODULE_ORDER = [
+    "东莞素质中心",
+    "管理中心",
+    "尔遇书馆",
+    "青少年宫",
+    "多维学校",
+    "新阳光幼儿园",
+    "托育项目",
+    "尔遇书城",
+    "合计",
+]
+BUDGET_EXCLUDED_PROJECTS = {"素质中心+管理中心", "尔遇书馆+书馆管理中心"}
+BUDGET_MODULE_COMPANY_LABELS = {
+    "东莞素质中心": {
+        "莞城小学部", "莞城初中部", "莞城高中部", "莞城个性化", "南城", "石龙", "万江",
+        "西平", "厚街", "石碣", "虎门", "石井", "东泰", "虎翼营", "南城宏图", "茶山学前",
+        "寮步石大", "西平三和", "南城虎翼", "高埗", "长安", "拔创中心",
+    },
+    "管理中心": {"管理中心", "素质管理中心", "广东多维教育科技集团有限公司", "东莞非学科管理中心"},
+    "尔遇书馆": {
+        "书馆管理中心", "尔遇书馆莞城", "尔遇书馆西平", "尔遇书馆东城", "尔遇书馆金域",
+        "尔遇书馆星城", "尔遇书馆龙景", "尔遇书馆翡丽山", "尔遇书馆西城楼", "深圳卓越",
+    },
+    "青少年宫": {"少年宫", "青少年宫", "莞城青少年宫"},
+    "多维学校": {"多维学校", "东莞市望牛墩多维学校"},
+    "新阳光幼儿园": {"新阳光幼儿园", "茶山幼儿园", "幼儿园"},
+    "托育项目": {"托育项目", "茶山托育", "茶山托育项目"},
+    "尔遇书城": {"尔遇书城"},
+    "合计": {"合计", "合并"},
+}
+BUDGET_BUSINESS_GROUP_MODULES = {
+    "非学科素质中心模块": "东莞素质中心",
+    "职能公司模块": "管理中心",
+    "尔遇书馆模块": "尔遇书馆",
+    "少年宫模块": "青少年宫",
+    "学校模块": "多维学校",
+    "幼儿园模块": "新阳光幼儿园",
+}
+
 
 def get_income_statement_fixed_item_order() -> list[str]:
     return list(INCOME_STATEMENT_FIXED_ITEMS)
@@ -6335,6 +6524,1314 @@ def render_income_statement():
             )
         else:
             st.error("无数据：请先上传损益表 Excel 文件")
+
+
+def _budget_empty_plan_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        columns=["module", "unit_name", "income_budget", "profit_budget", "budget_level"]
+    )
+
+
+def _budget_empty_actual_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        columns=["module", "unit_name", "company_code", "income_actual", "profit_actual"]
+    )
+
+
+def _budget_empty_quality_center_targets_frame() -> pd.DataFrame:
+    return pd.DataFrame(columns=["campus_name", "income_budget"])
+
+
+def _budget_empty_quality_center_actual_frame() -> pd.DataFrame:
+    return pd.DataFrame(columns=["actual_name", "company_code", "actual_income"])
+
+
+def _budget_text(value) -> str:
+    return str(value or "").strip()
+
+
+def _budget_numeric(value) -> float:
+    if isinstance(value, str) and not value.strip():
+        return 0.0
+    return _safe_float(value)
+
+
+def _budget_missing_file_message() -> str:
+    return "未找到预算表，请配置 FINANCE_DW_BUDGET_WORKBOOK，或将预算文件放到 data/2026年集团预算.xlsx。"
+
+
+def budget_time_progress(month: str | int) -> float:
+    try:
+        month_value = int(str(month).replace("月", "").strip())
+    except (TypeError, ValueError):
+        month_value = 1
+    month_value = min(max(month_value, 1), 12)
+    return month_value / 12
+
+
+def _budget_module_for_name(name: str, business_group: str | None = None) -> str:
+    label = INCOME_STATEMENT_COMPANY_DISPLAY_ALIASES.get(_budget_text(name), _budget_text(name))
+    if label in BUDGET_MODULE_ORDER:
+        return label
+    for module, labels in BUDGET_MODULE_COMPANY_LABELS.items():
+        if label in labels:
+            return module
+    if "尔遇书城" in label:
+        return "尔遇书城"
+    if "尔遇书馆" in label or "书馆管理中心" in label:
+        return "尔遇书馆"
+    if "少年宫" in label or "青少年宫" in label:
+        return "青少年宫"
+    if "幼儿园" in label:
+        return "新阳光幼儿园"
+    if "托育" in label:
+        return "托育项目"
+    if "学校" in label:
+        return "多维学校"
+    if "管理中心" in label or "广东多维" in label:
+        return "管理中心"
+    group = _budget_text(business_group)
+    if group in BUDGET_BUSINESS_GROUP_MODULES:
+        return BUDGET_BUSINESS_GROUP_MODULES[group]
+    return "未分组"
+
+
+def read_budget_plan(
+    workbook_path: str | Path = BUDGET_WORKBOOK_PATH,
+    sheet_name: str = BUDGET_SHEET_NAME,
+) -> pd.DataFrame:
+    path = Path(workbook_path)
+    if not path.exists():
+        return _budget_empty_plan_frame()
+    try:
+        from openpyxl import load_workbook
+
+        workbook = load_workbook(path, data_only=True, read_only=True)
+        if sheet_name not in workbook.sheetnames:
+            return _budget_empty_plan_frame()
+        sheet = workbook[sheet_name]
+        header_row = None
+        header_map: dict[str, int] = {}
+        required = {"项目", "全年收入", "净利润"}
+        for row_idx, row in enumerate(sheet.iter_rows(values_only=True), start=1):
+            values = [_budget_text(value) for value in row]
+            if required.issubset(set(values)):
+                header_row = row_idx
+                header_map = {value: idx for idx, value in enumerate(values) if value}
+                break
+        if header_row is None:
+            return _budget_empty_plan_frame()
+
+        rows = []
+        for row in sheet.iter_rows(min_row=header_row + 1, values_only=True):
+            project = _budget_text(row[header_map["项目"]])
+            if not project:
+                if rows:
+                    break
+                continue
+            if project in BUDGET_EXCLUDED_PROJECTS or project.endswith("损益"):
+                continue
+            if project == "项目":
+                break
+            module = _budget_module_for_name(project)
+            level = "module" if project in BUDGET_MODULE_ORDER else "unit"
+            rows.append(
+                {
+                    "module": module,
+                    "unit_name": project,
+                    "income_budget": _budget_numeric(row[header_map["全年收入"]]),
+                    "profit_budget": _budget_numeric(row[header_map["净利润"]]),
+                    "budget_level": level,
+                }
+            )
+        if not rows:
+            return _budget_empty_plan_frame()
+        return pd.DataFrame(rows, columns=_budget_empty_plan_frame().columns)
+    except Exception:
+        return _budget_empty_plan_frame()
+
+
+def read_quality_center_campus_budget_targets(
+    workbook_path: str | Path = BUDGET_WORKBOOK_PATH,
+    sheet_name: str = BUDGET_QUALITY_CENTER_SHEET_NAME,
+) -> pd.DataFrame:
+    path = Path(workbook_path)
+    if not path.exists():
+        return _budget_empty_quality_center_targets_frame()
+    try:
+        from openpyxl import load_workbook
+
+        workbook = load_workbook(path, data_only=True, read_only=True)
+        if sheet_name not in workbook.sheetnames:
+            return _budget_empty_quality_center_targets_frame()
+        sheet = workbook[sheet_name]
+        header = [_budget_text(cell.value) for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
+        target_idx = None
+        for idx, value in enumerate(header):
+            if value and any(token in value for token in ("合并收入", "全年", "合计", "目标", "总目标")):
+                target_idx = idx
+                break
+        if target_idx is None:
+            # The confirmed workbook uses Excel column N for the annual campus target.
+            target_idx = 13
+        campus_idx = None
+        for idx in range(min(target_idx, len(header) - 1), -1, -1):
+            if header[idx] == "校区":
+                campus_idx = idx
+                break
+        if campus_idx is None:
+            campus_idx = 0
+
+        rows = []
+        for row in sheet.iter_rows(min_row=2, values_only=True):
+            if len(row) <= max(campus_idx, target_idx):
+                continue
+            campus_name = _budget_text(row[campus_idx])
+            income_budget = _budget_numeric(row[target_idx])
+            if not campus_name or campus_name in {"合计", "总计"} or abs(income_budget) < 1e-9:
+                continue
+            rows.append({"campus_name": campus_name, "income_budget": income_budget})
+        if not rows:
+            return _budget_empty_quality_center_targets_frame()
+        return pd.DataFrame(rows, columns=_budget_empty_quality_center_targets_frame().columns)
+    except Exception:
+        return _budget_empty_quality_center_targets_frame()
+
+
+def load_quality_center_actual_income(period: str) -> pd.DataFrame:
+    if not period:
+        return _budget_empty_quality_center_actual_frame()
+    try:
+        df = execute_sql(
+            """
+            SELECT
+                COALESCE(NULLIF(TRIM(i.original_name), ''), NULLIF(TRIM(c.short_name), ''), NULLIF(TRIM(c.name), ''), i.company_code) AS actual_name,
+                i.company_code AS company_code,
+                SUM(CASE
+                    WHEN i.cumulative_value IS NOT NULL THEN i.cumulative_value
+                    WHEN i.period1_value IS NOT NULL THEN i.period1_value
+                    ELSE 0
+                END) AS actual_income
+            FROM income_statement i
+            LEFT JOIN companies c ON CAST(c.code AS TEXT) = CAST(i.company_code AS TEXT)
+            WHERE i.period = :period
+              AND i.item_name IN ('一、营业收入', '营业收入', '收入合计')
+            GROUP BY i.company_code, i.original_name, c.short_name, c.name
+            """,
+            {"period": period},
+        )
+    except Exception:
+        return _budget_empty_quality_center_actual_frame()
+    if df is None or df.empty:
+        return _budget_empty_quality_center_actual_frame()
+    result = df.copy()
+    result["actual_name"] = result["actual_name"].apply(_budget_text)
+    result["company_code"] = result["company_code"].apply(_budget_text)
+    result["actual_income"] = pd.to_numeric(result["actual_income"], errors="coerce").fillna(0.0)
+    result = result[result["actual_name"] != ""]
+    if result.empty:
+        return _budget_empty_quality_center_actual_frame()
+    return (
+        result.groupby(["actual_name", "company_code"], dropna=False, as_index=False)["actual_income"]
+        .sum()
+        .loc[:, _budget_empty_quality_center_actual_frame().columns]
+    )
+
+
+def _budget_quality_match_key(name: str) -> str:
+    text_value = _budget_text(name)
+    for token in (
+        "东莞市",
+        "东莞",
+        "多维教育",
+        "多维",
+        "素质教育",
+        "素质",
+        "学习中心",
+        "中心",
+        "校区",
+        "分校",
+        "总部",
+        "部",
+    ):
+        text_value = text_value.replace(token, "")
+    for token in ("（", "）", "(", ")", " ", "　", "&", "＆", "-", "—", "_", "/"):
+        text_value = text_value.replace(token, "")
+    return text_value.strip()
+
+
+def _budget_quality_candidate_text(candidates: list[dict]) -> str:
+    if not candidates:
+        return ""
+    values = []
+    for candidate in candidates:
+        name = _budget_text(candidate.get("actual_name"))
+        code = _budget_text(candidate.get("company_code"))
+        values.append(f"{name}（{code}）" if code else name)
+    return "、".join(values)
+
+
+def _budget_quality_confirmed_candidate(campus_name: str, actual_by_name: dict[str, list[dict]]) -> dict | None:
+    for actual_name in get_budget_campus_name_mappings().get(campus_name, ()):
+        candidates = actual_by_name.get(actual_name, [])
+        if len(candidates) == 1:
+            return candidates[0]
+    return None
+
+
+def match_quality_center_campus_actuals(targets_df: pd.DataFrame, actual_df: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "campus_name", "income_budget", "actual_name", "company_code", "actual_income",
+        "match_status", "match_note",
+    ]
+    if targets_df is None or targets_df.empty:
+        return pd.DataFrame(columns=columns)
+    actual_records = [] if actual_df is None or actual_df.empty else actual_df.to_dict("records")
+    actual_by_name: dict[str, list[dict]] = {}
+    actual_by_key: dict[str, list[dict]] = {}
+    for record in actual_records:
+        name = _budget_text(record.get("actual_name"))
+        if not name:
+            continue
+        normalized = _budget_quality_match_key(name)
+        actual_by_name.setdefault(name, []).append(record)
+        if normalized:
+            actual_by_key.setdefault(normalized, []).append(record)
+
+    rows = []
+    for target in targets_df.to_dict("records"):
+        campus_name = _budget_text(target.get("campus_name"))
+        budget = _safe_float(target.get("income_budget"))
+        normalized_target = _budget_quality_match_key(campus_name)
+        status = "未匹配"
+        note = "未找到可靠候选"
+        chosen: dict | None = None
+
+        special_statuses = get_budget_campus_special_statuses()
+        if campus_name in special_statuses:
+            status, note = special_statuses[campus_name]
+            rows.append(
+                {
+                    "campus_name": campus_name,
+                    "income_budget": budget,
+                    "actual_name": "",
+                    "company_code": "",
+                    "actual_income": None,
+                    "match_status": status,
+                    "match_note": note,
+                }
+            )
+            continue
+
+        confirmed_candidate = _budget_quality_confirmed_candidate(campus_name, actual_by_name)
+        if confirmed_candidate:
+            rows.append(
+                {
+                    "campus_name": campus_name,
+                    "income_budget": budget,
+                    "actual_name": _budget_text(confirmed_candidate.get("actual_name")),
+                    "company_code": _budget_text(confirmed_candidate.get("company_code")),
+                    "actual_income": _safe_float(confirmed_candidate.get("actual_income")),
+                    "match_status": "已匹配",
+                    "match_note": f"用户确认映射：{campus_name} -> {_budget_text(confirmed_candidate.get('actual_name'))}",
+                }
+            )
+            continue
+
+        exact_candidates = actual_by_name.get(campus_name, [])
+        normalized_candidates = actual_by_key.get(normalized_target, []) if normalized_target else []
+        contains_candidates = []
+        if normalized_target:
+            for record in actual_records:
+                actual_key = _budget_quality_match_key(record.get("actual_name"))
+                if actual_key and (normalized_target in actual_key or actual_key in normalized_target):
+                    contains_candidates.append(record)
+
+        if len(exact_candidates) == 1:
+            chosen = exact_candidates[0]
+            status = "已匹配"
+            note = "名称完全一致"
+        elif len(normalized_candidates) == 1:
+            chosen = normalized_candidates[0]
+            status = "已匹配"
+            note = "标准化名称一致"
+        elif len(contains_candidates) == 1:
+            status = "待确认"
+            note = f"候选：{_budget_quality_candidate_text(contains_candidates)}"
+        elif len(contains_candidates) > 1:
+            status = "待确认"
+            note = f"候选不唯一：{_budget_quality_candidate_text(contains_candidates)}"
+
+        rows.append(
+            {
+                "campus_name": campus_name,
+                "income_budget": budget,
+                "actual_name": _budget_text(chosen.get("actual_name")) if chosen else "",
+                "company_code": _budget_text(chosen.get("company_code")) if chosen else "",
+                "actual_income": _safe_float(chosen.get("actual_income")) if chosen else None,
+                "match_status": status,
+                "match_note": note,
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def quality_center_unmatched_items(match_df: pd.DataFrame) -> pd.DataFrame:
+    columns = ["预算校区名称", "系统候选名称", "匹配状态", "建议说明"]
+    if match_df is None or match_df.empty:
+        return pd.DataFrame(columns=columns)
+    rows = []
+    for row in match_df.to_dict("records"):
+        status = _budget_text(row.get("match_status"))
+        if status in {"已匹配", "待开业", "已取消"}:
+            continue
+        note = _budget_text(row.get("match_note"))
+        candidate = ""
+        if "候选：" in note:
+            candidate = note.split("候选：", 1)[1]
+        elif "候选不唯一：" in note:
+            candidate = note.split("候选不唯一：", 1)[1]
+        rows.append(
+            {
+                "预算校区名称": row.get("campus_name"),
+                "系统候选名称": candidate or "无",
+                "匹配状态": status,
+                "建议说明": note,
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def _budget_actual_unit_label(row: dict) -> str:
+    for key in ("original_name", "short_name", "company_name", "company_code"):
+        value = _budget_text(row.get(key))
+        if value:
+            return INCOME_STATEMENT_COMPANY_DISPLAY_ALIASES.get(value, value)
+    return "未命名公司"
+
+
+def load_budget_actuals(period: str) -> pd.DataFrame:
+    if not period:
+        return _budget_empty_actual_frame()
+    params = {
+        "period": period,
+        "revenue_item": "一、营业收入",
+        "profit_item": "四、净利润（净亏损以“-”号填列）",
+    }
+    df = execute_sql(
+        """
+        SELECT
+            i.company_code,
+            COALESCE(NULLIF(TRIM(i.original_name), ''), '') AS original_name,
+            COALESCE(NULLIF(TRIM(c.short_name), ''), '') AS short_name,
+            COALESCE(NULLIF(TRIM(c.name), ''), '') AS company_name,
+            COALESCE(NULLIF(TRIM(d.business_group), ''), '') AS business_group,
+            SUM(CASE WHEN i.item_name = :revenue_item THEN i.cumulative_value ELSE 0 END) AS income_actual,
+            SUM(CASE WHEN i.item_name = :profit_item THEN i.cumulative_value ELSE 0 END) AS profit_actual
+        FROM income_statement i
+        LEFT JOIN companies c ON CAST(c.code AS TEXT) = CAST(i.company_code AS TEXT)
+        LEFT JOIN dim_company d ON CAST(d.company_id AS TEXT) = CAST(i.company_code AS TEXT)
+        WHERE i.period = :period AND i.item_name IN (:revenue_item, :profit_item)
+        GROUP BY i.company_code, i.original_name, c.short_name, c.name, d.business_group
+        """,
+        params,
+    )
+    if df.empty:
+        return _budget_empty_actual_frame()
+    rows = []
+    for row in df.to_dict("records"):
+        label = _budget_actual_unit_label(row)
+        module = _budget_module_for_name(label, row.get("business_group"))
+        rows.append(
+            {
+                "module": module,
+                "unit_name": label,
+                "company_code": _budget_text(row.get("company_code")),
+                "income_actual": _safe_float(row.get("income_actual")),
+                "profit_actual": _safe_float(row.get("profit_actual")),
+            }
+        )
+    actual = pd.DataFrame(rows, columns=_budget_empty_actual_frame().columns)
+    return (
+        actual.groupby(["module", "unit_name", "company_code"], dropna=False, as_index=False)
+        .agg({"income_actual": "sum", "profit_actual": "sum"})
+    )
+
+
+def _budget_value_missing(value) -> bool:
+    if value is None:
+        return True
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _budget_metric_status(income_gap, profit_gap) -> str:
+    gaps = [
+        _safe_float(value)
+        for value in (income_gap, profit_gap)
+        if not _budget_value_missing(value)
+    ]
+    if not gaps:
+        return "暂无预算"
+    if all(value >= -1e-9 for value in gaps):
+        return "超前" if any(value >= 0.02 for value in gaps) else "正常"
+    return "滞后"
+
+
+def _budget_metric_progress(actual, budget, progress: float, metric: str) -> tuple[float | None, float | None]:
+    actual_value = _safe_float(actual)
+    budget_value = _safe_float(budget)
+    if abs(budget_value) < 1e-9:
+        return None, None
+    if metric == "profit" and budget_value < 0:
+        target = budget_value * progress
+        return None, (actual_value - target) / abs(budget_value)
+    completion = actual_value / budget_value
+    return completion, completion - progress
+
+
+def build_budget_completion_data(
+    plan_df: pd.DataFrame,
+    actual_df: pd.DataFrame,
+    selected_month: str | int,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    progress = budget_time_progress(selected_month)
+    plan_df = plan_df.copy() if plan_df is not None else _budget_empty_plan_frame()
+    actual_df = actual_df.copy() if actual_df is not None else _budget_empty_actual_frame()
+
+    module_rows = plan_df[plan_df["budget_level"] == "module"] if len(plan_df) else _budget_empty_plan_frame()
+    unit_rows = plan_df[plan_df["budget_level"] != "module"] if len(plan_df) else _budget_empty_plan_frame()
+    module_budget = (
+        module_rows.groupby("module", as_index=False)[["income_budget", "profit_budget"]].sum()
+        if len(module_rows)
+        else pd.DataFrame(columns=["module", "income_budget", "profit_budget"])
+    )
+    unit_budget = (
+        unit_rows.groupby(["module", "unit_name"], as_index=False)[["income_budget", "profit_budget"]].sum()
+        if len(unit_rows)
+        else pd.DataFrame(columns=["module", "unit_name", "income_budget", "profit_budget"])
+    )
+    if len(unit_budget):
+        missing_modules = set(unit_budget["module"]) - set(module_budget["module"])
+        if missing_modules:
+            module_budget = pd.concat(
+                [
+                    module_budget,
+                    unit_budget[unit_budget["module"].isin(missing_modules)]
+                    .groupby("module", as_index=False)[["income_budget", "profit_budget"]]
+                    .sum(),
+                ],
+                ignore_index=True,
+            )
+
+    actual_by_module = (
+        actual_df.groupby("module", as_index=False)[["income_actual", "profit_actual"]].sum()
+        if len(actual_df)
+        else pd.DataFrame(columns=["module", "income_actual", "profit_actual"])
+    )
+    modules = [
+        module
+        for module in BUDGET_MODULE_ORDER
+        if module in set(module_budget["module"]).union(set(actual_by_module["module"]))
+    ]
+    for module in sorted(set(module_budget["module"]).union(set(actual_by_module["module"])) - set(modules)):
+        modules.append(module)
+
+    overview_rows = []
+    for module in modules:
+        if module == "合计":
+            budget_row = module_budget[module_budget["module"] == module]
+            if len(budget_row):
+                income_budget = _safe_float(budget_row["income_budget"].sum())
+                profit_budget = _safe_float(budget_row["profit_budget"].sum())
+            else:
+                income_budget = _safe_float(module_budget.loc[module_budget["module"] != "合计", "income_budget"].sum())
+                profit_budget = _safe_float(module_budget.loc[module_budget["module"] != "合计", "profit_budget"].sum())
+            actual_row = actual_by_module[actual_by_module["module"] == module]
+            if len(actual_row):
+                income_actual = _safe_float(actual_row["income_actual"].sum())
+                profit_actual = _safe_float(actual_row["profit_actual"].sum())
+            else:
+                income_actual = _safe_float(actual_by_module.loc[actual_by_module["module"] != "合计", "income_actual"].sum())
+                profit_actual = _safe_float(actual_by_module.loc[actual_by_module["module"] != "合计", "profit_actual"].sum())
+        else:
+            budget_row = module_budget[module_budget["module"] == module]
+            actual_row = actual_by_module[actual_by_module["module"] == module]
+            income_budget = _safe_float(budget_row["income_budget"].sum()) if len(budget_row) else 0.0
+            profit_budget = _safe_float(budget_row["profit_budget"].sum()) if len(budget_row) else 0.0
+            income_actual = _safe_float(actual_row["income_actual"].sum()) if len(actual_row) else 0.0
+            profit_actual = _safe_float(actual_row["profit_actual"].sum()) if len(actual_row) else 0.0
+        income_completion, income_gap = _budget_metric_progress(income_actual, income_budget, progress, "income")
+        profit_completion, profit_gap = _budget_metric_progress(profit_actual, profit_budget, progress, "profit")
+        overview_rows.append(
+            {
+                "模块名称": module,
+                "收入预算": income_budget,
+                "收入实际": income_actual,
+                "收入完成率": income_completion,
+                "时间进度": progress,
+                "收入进度差": income_gap,
+                "利润预算": profit_budget,
+                "利润实际": profit_actual,
+                "利润完成率": profit_completion,
+                "利润进度差": profit_gap,
+                "状态": _budget_metric_status(income_gap, profit_gap),
+            }
+        )
+
+    details = actual_df.merge(unit_budget, how="left", on=["module", "unit_name"])
+    if len(unit_budget):
+        missing_actual = unit_budget.merge(actual_df, how="left", on=["module", "unit_name"])
+        missing_actual = missing_actual[missing_actual["income_actual"].isna() & missing_actual["profit_actual"].isna()]
+        if len(missing_actual):
+            details = pd.concat([details, missing_actual], ignore_index=True)
+    unit_budget_modules = set(unit_budget["module"].astype(str)) if len(unit_budget) else set()
+    if len(module_budget):
+        for module_row in module_budget.to_dict("records"):
+            module = str(module_row.get("module") or "")
+            if not module or module == "合计" or module in unit_budget_modules:
+                continue
+            income_budget = _safe_float(module_row.get("income_budget"))
+            profit_budget = _safe_float(module_row.get("profit_budget"))
+            if abs(income_budget) < 1e-9 and abs(profit_budget) < 1e-9:
+                continue
+            if details.empty:
+                module_details = pd.DataFrame()
+            else:
+                module_details = details[details["module"].astype(str) == module]
+            if len(module_details) == 1:
+                row_idx = module_details.index[0]
+                details.loc[row_idx, "income_budget"] = income_budget
+                details.loc[row_idx, "profit_budget"] = profit_budget
+            elif len(module_details) == 0:
+                details = pd.concat(
+                    [
+                        details,
+                        pd.DataFrame(
+                            [
+                                {
+                                    "module": module,
+                                    "unit_name": module,
+                                    "company_code": "__budget_only__",
+                                    "income_actual": None,
+                                    "profit_actual": None,
+                                    "income_budget": income_budget,
+                                    "profit_budget": profit_budget,
+                                }
+                            ]
+                        ),
+                    ],
+                    ignore_index=True,
+                )
+    if len(details):
+        details["income_budget"] = pd.to_numeric(details["income_budget"], errors="coerce").fillna(0.0)
+        details["profit_budget"] = pd.to_numeric(details["profit_budget"], errors="coerce").fillna(0.0)
+        budget_only_mask = details.get("company_code", pd.Series(dtype=str)).astype(str) == "__budget_only__"
+        details.loc[~budget_only_mask, "income_actual"] = pd.to_numeric(
+            details.loc[~budget_only_mask, "income_actual"],
+            errors="coerce",
+        ).fillna(0.0)
+        details.loc[~budget_only_mask, "profit_actual"] = pd.to_numeric(
+            details.loc[~budget_only_mask, "profit_actual"],
+            errors="coerce",
+        ).fillna(0.0)
+        details.loc[budget_only_mask, ["income_actual", "profit_actual"]] = None
+        income_progress = details.apply(
+            lambda row: _budget_metric_progress(row["income_actual"], row["income_budget"], progress, "income"),
+            axis=1,
+        )
+        profit_progress = details.apply(
+            lambda row: _budget_metric_progress(row["profit_actual"], row["profit_budget"], progress, "profit"),
+            axis=1,
+        )
+        details["收入完成率"] = income_progress.apply(lambda value: value[0])
+        details["收入进度差"] = income_progress.apply(lambda value: value[1])
+        details["利润完成率"] = profit_progress.apply(lambda value: value[0])
+        details["利润进度差"] = profit_progress.apply(lambda value: value[1])
+        details["状态"] = details.apply(
+            lambda row: _budget_metric_status(row["收入进度差"], row["利润进度差"]),
+            axis=1,
+        )
+        details.loc[budget_only_mask, ["收入完成率", "收入进度差", "利润完成率", "利润进度差"]] = None
+        details.loc[budget_only_mask, "状态"] = "待接入"
+        details = details.rename(
+            columns={
+                "unit_name": "公司名称",
+                "income_budget": "收入预算",
+                "income_actual": "收入实际",
+                "profit_budget": "利润预算",
+                "profit_actual": "利润实际",
+            }
+        )
+    else:
+        details = pd.DataFrame(
+            columns=[
+                "module", "公司名称", "收入预算", "收入实际", "收入完成率", "收入进度差",
+                "利润预算", "利润实际", "利润完成率", "利润进度差", "状态",
+            ]
+        )
+    return pd.DataFrame(overview_rows), details
+
+
+def _budget_display_frame(df: pd.DataFrame) -> pd.DataFrame:
+    display = df.copy()
+    for column in ["收入完成率", "时间进度", "收入进度差", "利润完成率", "利润进度差"]:
+        if column in display.columns:
+            display[column] = display[column].apply(
+                lambda value: None if _budget_value_missing(value) else _safe_float(value) * 100
+            )
+    return display
+
+
+def _render_budget_dataframe(df: pd.DataFrame, height: int = 360) -> None:
+    if df is None or df.empty:
+        st.info("当前范围暂无预算或实际数据。")
+        return
+    display = _budget_display_frame(df)
+    money_cols = {
+        "收入预算",
+        "收入实际",
+        "利润预算",
+        "利润实际",
+        "收入预算（万元）",
+        "收入实际（万元）",
+        "利润预算（万元）",
+        "利润实际（万元）",
+    }
+    percent_cols = {"收入完成率", "时间进度", "收入进度差", "利润完成率", "利润进度差"}
+    column_config = {
+        column: st.column_config.NumberColumn(column, format="%,.2f")
+        for column in display.columns
+        if column in money_cols
+    }
+    column_config.update(
+        {
+            column: st.column_config.NumberColumn(column, format="%.2f%%")
+            for column in display.columns
+            if column in percent_cols
+        }
+    )
+    st.dataframe(display, use_container_width=True, hide_index=True, height=height, column_config=column_config)
+
+
+def _format_budget_progress_cell(completion, progress, gap) -> str:
+    progress_text = f"时间进度 {_safe_float(progress) * 100:.2f}%"
+    if _budget_value_missing(gap):
+        return progress_text
+    gap_value = _safe_float(gap)
+    direction = "高于进度" if gap_value >= 0 else "低于进度"
+    gap_text = f"{direction} {abs(gap_value) * 100:.2f}%"
+    if _budget_value_missing(completion):
+        return f"{progress_text} / 预算偏差 {gap_value * 100:.2f}%"
+    return f"完成率 {_safe_float(completion) * 100:.2f}% / {progress_text} / {gap_text}"
+
+
+def _budget_overview_view(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+    view = df.copy()
+    view["收入进度"] = view.apply(
+        lambda row: _format_budget_progress_cell(row.get("收入完成率"), row.get("时间进度"), row.get("收入进度差")),
+        axis=1,
+    )
+    view["利润进度"] = view.apply(
+        lambda row: _format_budget_progress_cell(row.get("利润完成率"), row.get("时间进度"), row.get("利润进度差")),
+        axis=1,
+    )
+    return view[
+        [
+            "模块名称", "收入预算", "收入实际", "收入进度",
+            "利润预算", "利润实际", "利润进度", "状态",
+        ]
+    ]
+
+
+def _budget_detail_view(df: pd.DataFrame, progress: float) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+    view = df.copy()
+    view["收入进度"] = view.apply(
+        lambda row: _format_budget_progress_cell(row.get("收入完成率"), progress, row.get("收入进度差")),
+        axis=1,
+    )
+    view["利润进度"] = view.apply(
+        lambda row: _format_budget_progress_cell(row.get("利润完成率"), progress, row.get("利润进度差")),
+        axis=1,
+    )
+    return view[
+        [
+            "公司名称", "收入预算", "收入实际", "收入进度",
+            "利润预算", "利润实际", "利润进度", "状态",
+        ]
+    ]
+
+
+def _budget_module_drilldown_view(module_name: str, detail_df: pd.DataFrame, progress: float) -> pd.DataFrame:
+    if detail_df is None or detail_df.empty:
+        return pd.DataFrame()
+    drill_df = detail_df[detail_df["module"].astype(str) == str(module_name)].copy()
+    if drill_df.empty:
+        return pd.DataFrame()
+    view = _budget_detail_view(drill_df, progress).reset_index(drop=True).astype(object)
+    for output_idx, (_, source_row) in enumerate(drill_df.reset_index(drop=True).iterrows()):
+        income_budget = _safe_float(source_row.get("收入预算"))
+        profit_budget = _safe_float(source_row.get("利润预算"))
+        code = _budget_text(source_row.get("company_code"))
+        if abs(income_budget) < 1e-9:
+            view.loc[output_idx, "收入预算"] = "暂无预算"
+            view.loc[output_idx, "收入进度"] = "暂无预算"
+        if abs(profit_budget) < 1e-9:
+            view.loc[output_idx, "利润预算"] = "暂无预算"
+            view.loc[output_idx, "利润进度"] = "暂无预算"
+        if code == "__budget_only__":
+            view.loc[output_idx, "收入实际"] = "待接入"
+            view.loc[output_idx, "利润实际"] = "待接入"
+            view.loc[output_idx, "收入进度"] = "待接入"
+            view.loc[output_idx, "利润进度"] = "待接入"
+            view.loc[output_idx, "状态"] = "待接入"
+    return view
+
+
+def _budget_total_row(overview_df: pd.DataFrame) -> dict:
+    if overview_df is None or overview_df.empty:
+        return {}
+    total = overview_df[overview_df["模块名称"].astype(str) == "合计"]
+    if len(total):
+        return total.iloc[0].to_dict()
+    numeric_cols = ["收入预算", "收入实际", "利润预算", "利润实际"]
+    row = {"模块名称": "合计"}
+    for col in numeric_cols:
+        row[col] = _safe_float(pd.to_numeric(overview_df[col], errors="coerce").fillna(0.0).sum())
+    progress = _safe_float(overview_df["时间进度"].iloc[0]) if "时间进度" in overview_df.columns and len(overview_df) else 0.0
+    income_completion, income_gap = _budget_metric_progress(row["收入实际"], row["收入预算"], progress, "income")
+    profit_completion, profit_gap = _budget_metric_progress(row["利润实际"], row["利润预算"], progress, "profit")
+    row.update(
+        {
+            "收入完成率": income_completion,
+            "利润完成率": profit_completion,
+            "时间进度": progress,
+            "收入进度差": income_gap,
+            "利润进度差": profit_gap,
+            "状态": _budget_metric_status(income_gap, profit_gap),
+        }
+    )
+    return row
+
+
+def _fmt_budget_wan(value) -> str:
+    return f"{_safe_float(value) / 10000:,.1f} 万"
+
+
+def _fmt_budget_rate(value) -> str:
+    if _budget_value_missing(value):
+        return "-"
+    return f"{_safe_float(value) * 100:.1f}%"
+
+
+def _fmt_budget_gap(value) -> str:
+    if _budget_value_missing(value):
+        return "暂无进度差"
+    gap = _safe_float(value)
+    direction = "高于时间进度" if gap >= 0 else "低于时间进度"
+    return f"{direction} {abs(gap) * 100:.1f}%"
+
+
+def _budget_single_status(gap) -> str:
+    if _budget_value_missing(gap):
+        return "暂无预算"
+    gap_value = _safe_float(gap)
+    if gap_value < -1e-9:
+        return "滞后"
+    return "超前" if gap_value >= 0.02 else "正常"
+
+
+def _budget_average_completion(overview_df: pd.DataFrame) -> float | None:
+    if overview_df is None or overview_df.empty:
+        return None
+    rows = overview_df.copy()
+    if "模块名称" in rows.columns:
+        rows = rows[rows["模块名称"].astype(str) != "合计"]
+    values: list[float] = []
+    for column in ["收入完成率", "利润完成率"]:
+        if column not in rows.columns:
+            continue
+        for value in rows[column].tolist():
+            if not _budget_value_missing(value):
+                values.append(_safe_float(value))
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def _budget_kpi_cards_html(overview_df: pd.DataFrame, selected_month: str | int, progress: float) -> str:
+    total = _budget_total_row(overview_df)
+    average_completion = _budget_average_completion(overview_df)
+    income_completion = _fmt_budget_rate(total.get("收入完成率"))
+    profit_completion = _fmt_budget_rate(total.get("利润完成率"))
+    if profit_completion == "-":
+        profit_completion = f"预算偏差 {_fmt_budget_gap(total.get('利润进度差'))}"
+    return f"""
+    <style>
+      .budget-kpi-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:14px 0 16px;}}
+      .budget-kpi-card{{background:#fff;border:1px solid rgba(148,163,184,.26);border-radius:14px;padding:18px 20px;box-shadow:0 10px 24px rgba(15,23,42,.05);min-height:160px;}}
+      .budget-kpi-title{{font-size:15px;font-weight:800;color:#122033;margin-bottom:10px;}}
+      .budget-kpi-value{{font-size:26px;font-weight:850;color:#0f172a;line-height:1.15;margin-bottom:6px;}}
+      .budget-kpi-sub{{font-size:13px;color:#64748b;line-height:1.5;}}
+      .budget-kpi-delta{{display:inline-block;margin-top:10px;padding:4px 8px;border-radius:999px;background:#eef6ff;color:#1d4ed8;font-size:12px;font-weight:750;}}
+      .budget-kpi-progress{{height:8px;background:#e5eefb;border-radius:999px;overflow:hidden;margin:14px 0 8px;}}
+      .budget-kpi-progress span{{display:block;height:100%;width:{min(max(progress, 0), 1) * 100:.2f}%;background:#2f7de1;border-radius:999px;}}
+      @media (max-width: 980px){{.budget-kpi-grid{{grid-template-columns:1fr;}}}}
+    </style>
+    <div class="budget-kpi-grid">
+      <div class="budget-kpi-card">
+        <div class="budget-kpi-title">收入预算完成情况</div>
+        <div class="budget-kpi-value">实际收入 {_html(_fmt_budget_wan(total.get("收入实际")))}</div>
+        <div class="budget-kpi-sub">收入预算 {_html(_fmt_budget_wan(total.get("收入预算")))} · 收入完成率 {_html(income_completion)}</div>
+        <div class="budget-kpi-sub">时间进度 {progress * 100:.1f}% · 平均完成度 {_html(_fmt_budget_rate(average_completion))}</div>
+        <div class="budget-kpi-delta">{_html(_fmt_budget_gap(total.get("收入进度差")))}</div>
+        <div class="budget-kpi-sub">状态：{_html(_budget_single_status(total.get("收入进度差")))}</div>
+      </div>
+      <div class="budget-kpi-card">
+        <div class="budget-kpi-title">利润预算完成情况</div>
+        <div class="budget-kpi-value">实际利润 {_html(_fmt_budget_wan(total.get("利润实际")))}</div>
+        <div class="budget-kpi-sub">利润预算 {_html(_fmt_budget_wan(total.get("利润预算")))} · 利润完成率 {_html(profit_completion)}</div>
+        <div class="budget-kpi-sub">时间进度 {progress * 100:.1f}% · 平均完成度 {_html(_fmt_budget_rate(average_completion))}</div>
+        <div class="budget-kpi-delta">{_html(_fmt_budget_gap(total.get("利润进度差")))}</div>
+        <div class="budget-kpi-sub">状态：{_html(_budget_single_status(total.get("利润进度差")))}</div>
+      </div>
+    </div>
+    """
+
+
+def _render_budget_kpi_cards(overview_df: pd.DataFrame, selected_month: str | int, progress: float) -> None:
+    _render_html(_budget_kpi_cards_html(overview_df, selected_month, progress))
+
+
+def _budget_comparison_table_view(overview_df: pd.DataFrame) -> pd.DataFrame:
+    if overview_df is None or overview_df.empty:
+        return pd.DataFrame()
+    view = overview_df.copy()
+    return pd.DataFrame(
+        {
+            "经营单位": view["模块名称"],
+            "收入预算": pd.to_numeric(view["收入预算"], errors="coerce").fillna(0.0) / 10000,
+            "收入实际": pd.to_numeric(view["收入实际"], errors="coerce").fillna(0.0) / 10000,
+            "收入完成率": view["收入完成率"],
+            "利润预算": pd.to_numeric(view["利润预算"], errors="coerce").fillna(0.0) / 10000,
+            "利润实际": pd.to_numeric(view["利润实际"], errors="coerce").fillna(0.0) / 10000,
+            "利润完成率": view["利润完成率"],
+            "时间进度": view["时间进度"],
+            "进度判断": view["状态"],
+        }
+    )
+
+
+def _budget_cell_rate(value) -> str:
+    return "-" if _budget_value_missing(value) else f"{_safe_float(value) * 100:.2f}%"
+
+
+def _budget_cell_number(value) -> str:
+    return f"{_safe_float(value):,.2f}"
+
+
+def _budget_cell_html(value, kind: str = "text") -> str:
+    if kind == "number":
+        numeric = _safe_float(value)
+        class_name = "budget-table-num budget-negative" if numeric < 0 else "budget-table-num"
+        return f'<div class="{class_name}">{_html(_budget_cell_number(numeric))}</div>'
+    if kind == "rate":
+        if _budget_value_missing(value):
+            return '<div class="budget-table-num">-</div>'
+        numeric = _safe_float(value)
+        class_name = "budget-table-num budget-negative" if numeric < 0 else "budget-table-num"
+        return f'<div class="{class_name}">{numeric * 100:.2f}%</div>'
+    if kind == "status":
+        status = str(value or "")
+        class_name = "budget-status-lag" if status == "滞后" else "budget-status-ok"
+        return f'<div class="budget-status-cell"><span class="{class_name}">{_html(status)}</span></div>'
+    return f'<div class="budget-table-text">{_html(value)}</div>'
+
+
+def _budget_table_td_html(value, kind: str = "text", first: bool = False, total: bool = False) -> str:
+    classes = ["budget-table-cell"]
+    if first:
+        classes.append("budget-table-first")
+    if kind in {"number", "rate"}:
+        classes.append("budget-table-num")
+    elif kind == "status":
+        classes.append("budget-table-status")
+    if total:
+        classes.append("budget-table-total-cell")
+
+    if kind == "number":
+        numeric = _safe_float(value)
+        if numeric < 0:
+            classes.append("budget-negative")
+        content = _html(_budget_cell_number(numeric))
+    elif kind == "rate":
+        if _budget_value_missing(value):
+            content = "-"
+        else:
+            numeric = _safe_float(value)
+            if numeric < 0:
+                classes.append("budget-negative")
+            content = f"{numeric * 100:.2f}%"
+    elif kind == "status":
+        status = str(value or "")
+        status_class = "budget-status-lag" if status == "滞后" else "budget-status-ok"
+        content = f'<span class="{status_class}">{_html(status)}</span>'
+    else:
+        content = _html(value)
+    return f'<td class="{" ".join(classes)}">{content}</td>'
+
+
+def _render_budget_comparison_table(
+    overview_df: pd.DataFrame,
+    detail_df: pd.DataFrame,
+    progress: float,
+    period: str | None = None,
+) -> None:
+    view = _budget_comparison_table_view(overview_df)
+    if view.empty:
+        st.info("当前范围暂无预算或实际数据。")
+        return
+    headers = view.columns.tolist()
+    header_html = "".join(f"<th>{_html(header)}</th>" for header in headers)
+    body_rows = []
+    for index, row in enumerate(view.to_dict("records")):
+        module = str(row.get("经营单位") or "")
+        is_total = module == "合计"
+        row_class = "budget-total-row" if is_total else ""
+        if module == "合计":
+            first_cell = _budget_table_td_html(module, first=True, total=True)
+        else:
+            first_cell = (
+                '<td class="budget-table-cell budget-table-first">'
+                f'<a class="budget-module-link" target="_top" href="?budget_drill={quote(module, safe="")}">{_html(module)}</a>'
+                '</td>'
+            )
+        cells = [first_cell]
+        for column in headers[1:]:
+            value = row.get(column)
+            if column in {"收入预算", "收入实际", "利润预算", "利润实际"}:
+                cells.append(_budget_table_td_html(value, "number", total=is_total))
+            elif column in {"收入完成率", "利润完成率", "时间进度"}:
+                cells.append(_budget_table_td_html(value, "rate", total=is_total))
+            elif column == "进度判断":
+                cells.append(_budget_table_td_html(value, "status", total=is_total))
+            else:
+                cells.append(_budget_table_td_html(value, total=is_total))
+        body_rows.append(f'<tr class="{row_class}">{"".join(cells)}</tr>')
+    st.markdown(
+        f"""
+        <style>
+          .budget-table-toolbar{{display:flex;justify-content:flex-end;align-items:center;margin:-28px 0 6px;}}
+          .budget-unit-note{{color:#64748b;font-size:12px;font-weight:750;}}
+          .budget-table-scroll{{width:100%;overflow-x:auto;border:1px solid #d5deeb;border-radius:10px;background:#fff;box-shadow:0 10px 22px rgba(15,23,42,.04);}}
+          .budget-comparison-table{{width:100%;min-width:1040px;border-collapse:collapse;table-layout:fixed;background:#fff;}}
+          .budget-comparison-table th{{background:#eaf2ff;color:#10233f;font-size:13px;font-weight:850;text-align:right;padding:10px 12px;border-right:1px solid #d9e3f1;border-bottom:1px solid #c9d7e8;white-space:nowrap;}}
+          .budget-comparison-table th:first-child{{text-align:left;width:17%;}}
+          .budget-comparison-table th:nth-child(2),.budget-comparison-table th:nth-child(3),.budget-comparison-table th:nth-child(5),.budget-comparison-table th:nth-child(6){{width:12%;}}
+          .budget-comparison-table th:nth-child(4),.budget-comparison-table th:nth-child(7),.budget-comparison-table th:nth-child(8){{width:10%;}}
+          .budget-comparison-table th:last-child{{width:9%;border-right:0;text-align:center;}}
+          .budget-comparison-table td{{background:#fff;color:#10233f;font-size:13px;padding:10px 12px;border-right:1px solid #e3ebf6;border-bottom:1px solid #e3ebf6;vertical-align:middle;line-height:1.35;}}
+          .budget-comparison-table tr:nth-child(even) td{{background:#fbfdff;}}
+          .budget-comparison-table td:last-child{{border-right:0;}}
+          .budget-table-first{{text-align:left;font-weight:800;}}
+          .budget-table-num{{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}}
+          .budget-table-status{{text-align:center;}}
+          .budget-module-link{{display:inline;color:#1d4ed8;font-weight:850;text-decoration:none;border-bottom:1px solid rgba(29,78,216,.35);}}
+          .budget-module-link:hover{{color:#174ea6;border-bottom-color:#174ea6;}}
+          .budget-negative{{color:#d92d20!important;background:#fff7f7!important;}}
+          .budget-status-ok,.budget-status-lag{{display:inline-flex;align-items:center;justify-content:center;min-width:44px;border-radius:999px;padding:3px 8px;font-size:12px;font-weight:850;}}
+          .budget-status-ok{{background:#ecfdf3;color:#027a48;}}
+          .budget-status-lag{{background:#fff1f0;color:#d92d20;}}
+          .budget-total-row td{{font-weight:900;background:#f3f7ff!important;border-top:2px solid #c9d7e8;}}
+        </style>
+        <div class="budget-table-toolbar"><span class="budget-unit-note">单位：万元</span></div>
+        <div class="budget-table-scroll">
+          <table class="budget-comparison-table">
+            <thead><tr>{header_html}</tr></thead>
+            <tbody>{"".join(body_rows)}</tbody>
+          </table>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    drill_module = _get_query_param("budget_drill")
+    valid_modules = set(view["经营单位"].astype(str)) - {"合计"}
+    if drill_module in valid_modules:
+        _clear_query_param("budget_drill")
+        show_budget_drilldown_dialog(drill_module, detail_df, progress, period)
+
+
+def _budget_policy_note(progress: float) -> str:
+    return (
+        f"说明：全年预算按 100% 计算；月进度 = 月份 / 12；当前时间进度为 {progress * 100:.2f}%；"
+        "收入、利润完成率分别对比时间进度；平均完成度为有效经营单位完成率平均值；"
+        "负利润预算按进度目标判断，避免亏损扩大被误判为超前。"
+    )
+
+
+def _budget_quality_center_drilldown_view(
+    targets_df: pd.DataFrame,
+    progress: float,
+    actual_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    if targets_df is None or targets_df.empty:
+        return pd.DataFrame(
+            columns=["校区名称", "全年收入预算目标", "实际收入", "收入完成率", "时间进度", "进度差", "状态"]
+        )
+    source_actual = actual_df if actual_df is not None else _budget_empty_quality_center_actual_frame()
+    matched = match_quality_center_campus_actuals(targets_df, source_actual)
+    rows = []
+    for row in matched.to_dict("records"):
+        budget = _safe_float(row.get("income_budget"))
+        status = _budget_text(row.get("match_status"))
+        if status == "已匹配":
+            actual = _safe_float(row.get("actual_income"))
+            completion = actual / budget if abs(budget) >= 1e-9 else None
+            gap = completion - progress if not _budget_value_missing(completion) else None
+            final_status = _budget_single_status(gap)
+        elif status == "待确认":
+            actual = "待确认"
+            completion = "待确认"
+            gap = "待确认"
+            final_status = "待确认"
+        elif status in {"待开业", "已取消"}:
+            actual = status
+            completion = "-"
+            gap = "-"
+            final_status = status
+        else:
+            actual = "待匹配"
+            completion = "待匹配"
+            gap = "待匹配"
+            final_status = "待匹配"
+        rows.append(
+            {
+                "校区名称": row.get("campus_name"),
+                "全年收入预算目标": budget,
+                "实际收入": actual,
+                "收入完成率": completion,
+                "时间进度": progress,
+                "进度差": gap,
+                "状态": final_status,
+            }
+        )
+    view = pd.DataFrame(rows)
+    return view[["校区名称", "全年收入预算目标", "实际收入", "收入完成率", "时间进度", "进度差", "状态"]]
+
+
+def _budget_drill_cell_html(value, kind: str = "text") -> str:
+    if kind == "money":
+        if isinstance(value, str):
+            return f'<td class="budget-drill-text">{_html(value)}</td>'
+        numeric = _safe_float(value) / 10000
+        cls = "budget-drill-num budget-negative" if numeric < 0 else "budget-drill-num"
+        return f'<td class="{cls}">{_html(f"{numeric:,.2f}")}</td>'
+    if kind == "rate":
+        if isinstance(value, str) or _budget_value_missing(value):
+            return f'<td class="budget-drill-num">{_html(value if isinstance(value, str) else "-")}</td>'
+        numeric = _safe_float(value)
+        cls = "budget-drill-num budget-negative" if numeric < 0 else "budget-drill-num"
+        return f'<td class="{cls}">{numeric * 100:.2f}%</td>'
+    if kind == "status":
+        text_value = _budget_text(value)
+        if text_value in {"待匹配", "待确认", "待开业", "已取消"}:
+            cls = "budget-drill-status-wait"
+        elif text_value == "滞后":
+            cls = "budget-drill-status-lag"
+        else:
+            cls = "budget-drill-status-ok"
+        return f'<td class="budget-drill-center"><span class="{cls}">{_html(text_value)}</span></td>'
+    return f'<td class="budget-drill-text">{_html(value)}</td>'
+
+
+def _budget_drill_table_html(
+    display_df: pd.DataFrame,
+    money_cols: set[str],
+    rate_cols: set[str],
+    status_col: str = "状态",
+) -> str:
+    if display_df is None or display_df.empty:
+        return '<div class="budget-drill-empty">暂无下钻明细。</div>'
+    headers = "".join(f"<th>{_html(column)}</th>" for column in display_df.columns)
+    body_rows = []
+    for row in display_df.to_dict("records"):
+        cells = []
+        for column in display_df.columns:
+            value = row.get(column)
+            if column in money_cols:
+                cells.append(_budget_drill_cell_html(value, "money"))
+            elif column in rate_cols:
+                cells.append(_budget_drill_cell_html(value, "rate"))
+            elif column == status_col:
+                cells.append(_budget_drill_cell_html(value, "status"))
+            else:
+                cells.append(_budget_drill_cell_html(value, "text"))
+        body_rows.append(f"<tr>{''.join(cells)}</tr>")
+    return f"""
+    <style>
+      .budget-drill-wrap{{margin-top:10px;overflow-x:auto;}}
+      .budget-drill-unit{{display:block;text-align:right;font-size:12px;font-weight:750;color:#64748b;margin-bottom:6px;}}
+      .budget-drill-table{{width:100%;min-width:760px;border-collapse:collapse;background:#fff;border:1px solid #dbe5f2;border-radius:10px;overflow:hidden;}}
+      .budget-drill-table th{{background:#edf4ff;color:#10233f;font-size:13px;font-weight:850;text-align:center;padding:9px 10px;border:1px solid #dbe5f2;white-space:nowrap;}}
+      .budget-drill-table td{{font-size:13px;padding:9px 10px;border:1px solid #e4ebf5;}}
+      .budget-drill-text{{color:#10233f;text-align:left;font-weight:700;}}
+      .budget-drill-num{{color:#10233f;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}}
+      .budget-drill-center{{text-align:center;}}
+      .budget-drill-status-ok,.budget-drill-status-lag,.budget-drill-status-wait{{display:inline-flex;align-items:center;justify-content:center;min-width:52px;border-radius:999px;padding:3px 8px;font-size:12px;font-weight:850;}}
+      .budget-drill-status-ok{{background:#ecfdf3;color:#027a48;}}
+      .budget-drill-status-lag{{background:#fff1f0;color:#d92d20;}}
+      .budget-drill-status-wait{{background:#f1f5f9;color:#475569;}}
+      .budget-drill-empty{{padding:14px;border:1px dashed #cbd5e1;border-radius:10px;color:#64748b;background:#fff;}}
+    </style>
+    <div class="budget-drill-unit">单位：万元</div>
+    <div class="budget-drill-wrap">
+      <table class="budget-drill-table">
+        <thead><tr>{headers}</tr></thead>
+        <tbody>{''.join(body_rows)}</tbody>
+      </table>
+    </div>
+    """
+
+
+def _budget_drill_summary_html(title: str, budget, actual, completion, progress: float, status: str) -> str:
+    completion_text = completion if isinstance(completion, str) else _fmt_budget_rate(completion)
+    actual_text = actual if isinstance(actual, str) else _fmt_budget_wan(actual)
+    return f"""
+    <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:10px 0 12px;">
+      <div style="background:#f8fbff;border:1px solid #dbe5f2;border-radius:10px;padding:10px;"><b>{_html(title)}</b></div>
+      <div style="background:#fff;border:1px solid #dbe5f2;border-radius:10px;padding:10px;">预算目标<br><b>{_html(_fmt_budget_wan(budget))}</b></div>
+      <div style="background:#fff;border:1px solid #dbe5f2;border-radius:10px;padding:10px;">实际<br><b>{_html(actual_text)}</b></div>
+      <div style="background:#fff;border:1px solid #dbe5f2;border-radius:10px;padding:10px;">完成率 / 时间<br><b>{_html(completion_text)} / {progress * 100:.2f}%</b></div>
+      <div style="background:#fff;border:1px solid #dbe5f2;border-radius:10px;padding:10px;">状态<br><b>{_html(status)}</b></div>
+    </div>
+    """
+
+
+@st.dialog("经营单位预算下钻", width="large")
+def show_budget_drilldown_dialog(
+    module_name: str,
+    detail_df: pd.DataFrame,
+    progress: float,
+    period: str | None = None,
+) -> None:
+    if str(module_name) == "东莞素质中心":
+        st.markdown("#### 经营单位预算下钻 - 东莞素质中心")
+        targets = read_quality_center_campus_budget_targets()
+        if targets.empty:
+            st.info("未读取到东莞素质中心校区预算目标。")
+        else:
+            actuals = load_quality_center_actual_income(period or "")
+            matched = match_quality_center_campus_actuals(targets, actuals)
+            display = _budget_quality_center_drilldown_view(targets, progress, actuals)
+            matched_display = display[display["实际收入"].apply(lambda value: not isinstance(value, str))]
+            total_budget = _safe_float(pd.to_numeric(display["全年收入预算目标"], errors="coerce").fillna(0.0).sum())
+            total_actual = _safe_float(pd.to_numeric(matched_display["实际收入"], errors="coerce").fillna(0.0).sum())
+            completion = total_actual / total_budget if abs(total_budget) >= 1e-9 and len(matched_display) else "待匹配"
+            gap = completion - progress if not isinstance(completion, str) else None
+            status = _budget_single_status(gap) if gap is not None else "待匹配"
+            _render_html(_budget_drill_summary_html("校区收入目标", total_budget, total_actual if len(matched_display) else "待匹配", completion, progress, status))
+            _render_html(
+                _budget_drill_table_html(
+                    display,
+                    money_cols={"全年收入预算目标", "实际收入"},
+                    rate_cols={"收入完成率", "时间进度", "进度差"},
+                )
+            )
+            unmatched = quality_center_unmatched_items(matched)
+            if not unmatched.empty:
+                with st.expander("待确认/未匹配校区清单", expanded=False):
+                    st.dataframe(unmatched, use_container_width=True, hide_index=True)
+            st.caption(f"预算目标来源：{BUDGET_QUALITY_CENTER_SHEET_NAME}，优先读取表头中的“合并收入/合计/目标/全年”列；当前表为第 N 列“合并收入”。")
+        if st.button("关闭明细", use_container_width=True):
+            st.rerun()
+        return
+
+    st.markdown(f"#### 经营单位预算下钻 - {module_name}")
+    drill_df = detail_df[detail_df["module"].astype(str) == str(module_name)].copy() if len(detail_df) else pd.DataFrame()
+    detail_view = _budget_module_drilldown_view(module_name, detail_df, progress)
+    total_budget = _safe_float(pd.to_numeric(drill_df.get("收入预算", pd.Series(dtype=float)), errors="coerce").fillna(0.0).sum())
+    total_actual = _safe_float(pd.to_numeric(drill_df.get("收入实际", pd.Series(dtype=float)), errors="coerce").fillna(0.0).sum())
+    completion, gap = _budget_metric_progress(total_actual, total_budget, progress, "income")
+    _render_html(_budget_drill_summary_html("公司收入进度", total_budget, total_actual, completion, progress, _budget_single_status(gap)))
+    _render_html(
+        _budget_drill_table_html(
+            detail_view,
+            money_cols={"收入预算", "收入实际", "利润预算", "利润实际"},
+            rate_cols=set(),
+        )
+    )
+    if st.button("关闭明细", use_container_width=True):
+        st.rerun()
+
+
+def render_budget_dashboard():
+    st.markdown('<div class="page-header">全面预算</div>', unsafe_allow_html=True)
+    st.caption(f"{BUDGET_VERSION} · 第一版只看收入预算、利润预算和经营单位完成进度。")
+
+    years, months = _get_year_month_options("income_statement")
+    if not years:
+        years = ["2026"]
+    if not months:
+        months = [f"{idx:02d}" for idx in range(1, 13)]
+    c1, c2, c3, c4, c5 = st.columns([0.85, 0.85, 1.15, 1.55, 0.95], gap="small")
+    with c1:
+        selected_year = st.selectbox("年份", years, index=0, key="budget_year")
+    with c2:
+        default_month = "03" if "03" in months else months[0]
+        selected_month = st.selectbox(
+            "月份",
+            months,
+            index=months.index(default_month) if default_month in months else 0,
+            key="budget_month",
+        )
+    with c3:
+        st.selectbox("经营单位", ["1 集团"], key="budget_scope", disabled=True)
+    with c4:
+        st.selectbox("预算版本", [BUDGET_VERSION], key="budget_version", disabled=True)
+    with c5:
+        st.markdown("<div style='height: 1.75rem;'></div>", unsafe_allow_html=True)
+        st.button("查询预算", type="primary", icon=":material/search:", key="budget_query", use_container_width=True)
+
+    period = f"{selected_year}{selected_month}"
+    plan_df = read_budget_plan()
+    if plan_df.empty:
+        st.warning(_budget_missing_file_message())
+    actual_df = load_budget_actuals(period)
+    overview_df, detail_df = build_budget_completion_data(plan_df, actual_df, selected_month)
+    progress = budget_time_progress(selected_month)
+
+    tab_overview, tab_income, tab_profit, tab_unit = st.tabs(["预算总览", "收入预算", "利润预算", "经营单位对比"])
+    with tab_overview:
+        _render_budget_kpi_cards(overview_df, selected_month, progress)
+        with st.container(border=True):
+            st.markdown("#### 经营单位预算进度对比")
+            _render_budget_comparison_table(overview_df, detail_df, progress, period)
+            st.caption(_budget_policy_note(progress))
+
+    with tab_income:
+        income_view = _budget_overview_view(overview_df)
+        columns = ["模块名称", "收入预算", "收入实际", "收入进度", "状态"]
+        _render_budget_dataframe(income_view[[column for column in columns if column in income_view.columns]], height=420)
+
+    with tab_profit:
+        profit_view = _budget_overview_view(overview_df)
+        columns = ["模块名称", "利润预算", "利润实际", "利润进度", "状态"]
+        _render_budget_dataframe(profit_view[[column for column in columns if column in profit_view.columns]], height=420)
+
+    with tab_unit:
+        if len(detail_df):
+            display = _budget_detail_view(detail_df, progress).copy()
+            display.insert(0, "模块名称", detail_df["module"].astype(str).tolist())
+        else:
+            display = detail_df
+        _render_budget_dataframe(display, height=520)
+
 
 def render_cashflow():
     st.markdown('<div class="page-header">💵 现金流量表</div>', unsafe_allow_html=True)
@@ -7317,6 +8814,14 @@ def _render_base_settings_naming():
     else:
         st.success("当前没有发现启用别名冲突。")
 
+    st.markdown("#### 预算校区名称映射")
+    st.caption("用于把预算表中的校区名称对应到系统实际经营单位/校区名称；该口径供全面预算、课消、方案结果等模块复用。")
+    budget_mapping_df = get_budget_campus_mapping_records()
+    if len(budget_mapping_df):
+        st.table(budget_mapping_df)
+    else:
+        st.info("暂无预算校区名称映射。")
+
     st.markdown("#### 未识别公司名")
     issue_df = _base_settings_read_table("import_issue_pool", limit=100)
     if len(issue_df):
@@ -7700,6 +9205,7 @@ def main():
         "利润表总览驾驶舱": render_profit_dashboard,
         "利润表明细（原表）": render_profit_original_table,
         "费用科目分析": render_expense_subject_analysis,
+        "全面预算": render_budget_dashboard,
         "盈亏平衡测算": render_break_even_calculator,
         "合并报表": render_consolidated,
         "多期对比": render_multi_period,

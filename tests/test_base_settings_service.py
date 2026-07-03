@@ -7,6 +7,9 @@ from src.base_settings_service import (
     detect_company_hierarchy_issues,
     get_base_health_checks,
     get_base_settings_overview,
+    get_budget_campus_mapping_records,
+    get_budget_campus_name_mappings,
+    get_budget_campus_special_statuses,
     get_business_group_options,
     get_company_hierarchy_children_map,
     get_company_dimension,
@@ -284,3 +287,16 @@ def test_company_hierarchy_graph_is_read_only_for_companies_and_dimensions():
     assert expanded
     assert after_companies == before_companies
     assert after_dimensions == before_dimensions
+
+
+def test_budget_campus_mapping_records_are_exposed_from_base_settings():
+    mappings = get_budget_campus_name_mappings()
+    special = get_budget_campus_special_statuses()
+    records = get_budget_campus_mapping_records()
+
+    assert mappings["南城虎翼营"] == ("南城虎翼",)
+    assert mappings["茶山校区"] == ("茶山学前",)
+    assert "南城" in mappings["华凯校区"]
+    assert special["松山湖校区"][0] == "待开业"
+    assert special["产品中心直营校"][0] == "已取消"
+    assert set(records["预算校区名称"]) >= {"南城虎翼营", "茶山校区", "华凯校区", "松山湖校区", "产品中心直营校"}

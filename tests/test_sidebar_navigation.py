@@ -31,6 +31,14 @@ def test_sidebar_has_four_top_level_modules_and_base_settings_entries():
     assert app._sidebar_page_module_map()["base_settings.company_profile"] == "基础设置"
 
 
+def test_business_center_uses_budget_entry_in_profit_dashboard_slot():
+    business_entries = app.NAV_MODULE_SECTIONS["经营中心"]["经营看板"]
+
+    assert business_entries[1] == "全面预算"
+    assert "利润表总览驾驶舱" not in business_entries
+    assert business_entries.count("全面预算") == 1
+
+
 def test_sidebar_expanded_state_keeps_multiple_modules_open():
     expanded = app._sidebar_expanded_state(
         "base_settings.company_profile",
