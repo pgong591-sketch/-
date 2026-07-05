@@ -16,6 +16,28 @@ def test_income_cost_expense_workbook_identifies_as_pl_detail():
     assert identify_report_type(str(SAMPLE), preview, source_name=SAMPLE.name) == RT_INCOME_COST_EXPENSE
 
 
+def test_yu_bookstore_management_center_income_cost_identifies_as_pl_detail():
+    preview = pd.read_excel(SAMPLE, nrows=12, header=None)
+    source_name = "202603尔遇书馆管理中心(K0511)收入成本费用明细表.xls"
+
+    assert identify_report_type("tmp.xls", preview, source_name=source_name) == RT_INCOME_COST_EXPENSE
+
+
+def test_yu_bookstore_management_center_maps_to_10204(monkeypatch):
+    source_name = "202603尔遇书馆管理中心(K0511)收入成本费用明细表.xls"
+
+    def fake_resolve_company_code(name):
+        return ("10204", "alias") if name == "尔遇书馆管理中心" else (None, "none")
+
+    monkeypatch.setattr("src.import_parser.resolve_company_code", fake_resolve_company_code)
+
+    df, report_type, info = parse_file(str(SAMPLE), original_filename=source_name)
+
+    assert report_type == RT_INCOME_COST_EXPENSE
+    assert info["errors"] == []
+    assert set(df["company_code"]) == {"10204"}
+
+
 def test_income_cost_expense_workbook_parses_operating_summary_source_rows():
     df, report_type, info = parse_file(str(SAMPLE), original_filename=SAMPLE.name)
 

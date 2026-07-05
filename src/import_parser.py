@@ -18,6 +18,7 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 
+from .company_aliases import resolve_company_code
 from .report_types import FILE_NAME_PATTERNS, HEADER_KEYWORDS, \
     RT_ACCOUNT_BALANCE, RT_BALANCE_SHEET, RT_INCOME_STATEMENT, RT_PL_DETAIL, \
     RT_INCOME_COST_EXPENSE, RT_REVENUE_VOLUME, RT_NON_SUBJECT_ALLOCATION, RT_MGMT_DEPT_INCOME_COST, \
@@ -92,6 +93,44 @@ def _looks_like_matrix_dept_report(df: Optional[pd.DataFrame]) -> bool:
     return ("会计科目" in text and "部门档案" in text) or ("会计科目" in text and "统计方式" in text and "余额方向" in text)
 
 
+def _is_income_cost_name(text: str) -> bool:
+    return "收入成本费用表" in text or "收入成本费用明细" in text
+
+
+def _is_explicit_mgmt_income_cost_name(text: str) -> bool:
+    explicit_tokens = [
+        "管理中心部门收入成本费用表",
+        "非学科管理中心部门收入成本费用表",
+        "部门收入成本费用表",
+        "管理公司收入成本费用表",
+    ]
+    return any(token in text for token in explicit_tokens)
+
+
+def _income_cost_company_candidates(text: str) -> list[str]:
+    raw = str(text or "").strip()
+    if not raw:
+        return []
+    stem = Path(raw).stem
+    without_period = re.sub(r"^(20\d{4}|20\d{2}[-_.年]?\d{1,2}月?)", "", stem).strip()
+    without_parentheses = re.sub(r"[（(][^）)]*[）)]", "", without_period).strip()
+    cleaned = without_parentheses
+    for token in ["收入成本费用明细表", "收入成本费用表", "收入成本费用明细", "收入成本费用"]:
+        cleaned = cleaned.replace(token, "")
+    return [candidate.strip() for candidate in [cleaned, without_parentheses, stem, raw] if candidate.strip()]
+
+
+def _resolve_company_candidate(text: str) -> Optional[str]:
+    for candidate in _income_cost_company_candidates(text):
+        try:
+            code, _source = resolve_company_code(candidate)
+        except Exception:
+            code = None
+        if code:
+            return code
+    return None
+
+
 def identify_report_type(
     file_path: str,
     df: Optional[pd.DataFrame] = None,
@@ -113,10 +152,14 @@ def identify_report_type(
     zh_name_hint = "".join(candidate_names)
 
     # 0. ASCII 文件名兜底（处理临时拷贝文件名）
+    if _is_explicit_mgmt_income_cost_name(zh_name_hint):
+        if "非学科" in zh_name_hint:
+            return RT_NON_SUBJECT_MGMT_DEPT_INCOME_COST
+        return RT_MGMT_DEPT_INCOME_COST
+    if _is_income_cost_name(zh_name_hint):
+        return RT_INCOME_COST_EXPENSE
     if "非学科管理中心" in zh_name_hint:
         return RT_NON_SUBJECT_MGMT_DEPT_INCOME_COST
-    if "管理中心部门收入成本费用表" in zh_name_hint:
-        return RT_MGMT_DEPT_INCOME_COST
     if "非学科课酬" in zh_name_hint:
         return RT_NON_SUBJECT_TEACHING_FEE
     if "收入人次" in zh_name_hint:
@@ -686,7 +729,11 @@ class PlDetailParser(BaseParser):
             return pd.DataFrame()
 
         header = raw.iloc[header_idx].fillna("").astype(str).str.strip().tolist()
-        company = self._extract_income_cost_company(raw, kwargs.get("company_code") or self.company_code)
+        company = self._extract_income_cost_company(
+            raw,
+            kwargs.get("company_code") or self.company_code,
+            kwargs.get("original_filename") or file_path,
+        )
         period = kwargs.get("period") or self.period or self._extract_income_cost_period(raw, file_path)
         month = int(str(period)[4:6]) if str(period).isdigit() and len(str(period)) == 6 else None
         current_col = self._find_header_col(header, f"{month}月") if month else None
@@ -752,9 +799,17 @@ class PlDetailParser(BaseParser):
         period = _extract_period_yyyymm(text)
         return period or _extract_period_yyyymm(Path(file_path).name)
 
-    def _extract_income_cost_company(self, raw: pd.DataFrame, fallback: Optional[str]) -> str:
+    def _extract_income_cost_company(
+        self,
+        raw: pd.DataFrame,
+        fallback: Optional[str],
+        source_name: Optional[str] = None,
+    ) -> str:
         if fallback:
             return str(fallback).strip()
+        source_code = _resolve_company_candidate(source_name or "")
+        if source_code:
+            return source_code
         top = raw.head(8).fillna("").astype(str)
         for _, row in top.iterrows():
             for value in row.tolist():
@@ -763,7 +818,11 @@ class PlDetailParser(BaseParser):
                     return text
         text = " ".join(top.values.flatten().tolist())
         m = re.search(r"单位[:：]\s*([^\s]+)", text)
-        return m.group(1).strip() if m else ""
+        if m:
+            company_name = m.group(1).strip()
+            code = _resolve_company_candidate(company_name)
+            return code or company_name
+        return ""
 
     def _income_cost_category(self, item_name: str, income_section: bool) -> str:
         if item_name in {"收入合计", "主营业务收入", "其他业务收入", "投资收益", "营业外收入"} or income_section:
@@ -1963,7 +2022,7 @@ def parse_file(file_path: str, report_type: Optional[str] = None,
 
     # 解析
     try:
-        df = parser.parse(file_path, company_code=company_code, period=period)
+        df = parser.parse(file_path, company_code=company_code, period=period, original_filename=original_filename)
         result_info["errors"] = parser.errors
         result_info["warnings"] = parser.warnings
 

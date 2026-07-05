@@ -5,6 +5,7 @@
 """
 
 import os, sys, tempfile, io, zipfile
+import re
 from pathlib import Path
 from html import escape
 from math import ceil
@@ -17,7 +18,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from src.db_connection import init_database, execute_sql, get_session
+from src.db_connection import init_database, execute_sql, get_session, get_db_path
 from sqlalchemy import text
 
 from src.reports import (
@@ -51,7 +52,7 @@ from src.company_structure import (
 )
 from src.dashboard_metrics import COST_ITEMS, INCOME_ITEM, NET_PROFIT_ITEM, get_dashboard_periods, get_home_dashboard
 from src.multidim_reports import get_multidim_income_statement, get_operating_summary
-from src.template_workbook import TemplateWorkbookError, load_template_sheet, read_template_bytes
+from src.template_workbook import TemplateWorkbookError, load_template_sheet, load_template_sheet_frame, read_template_bytes
 from src.monthly_collection import (
     ensure_monthly_collection_schema,
     get_collection_matrix,
@@ -95,8 +96,10 @@ from src.filter_options_service import (
 
 try:
     import plotly.express as px
+    import plotly.graph_objects as go
 except Exception:
     px = None
+    go = None
 
 st.set_page_config(page_title="财务数据仓库", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
 
@@ -1974,6 +1977,13 @@ def _toggle_sidebar_module(expanded_modules: dict[str, bool], module_name: str) 
     return updated
 
 
+def _set_sidebar_page(page_key: str, module_name: str) -> None:
+    st.session_state.nav_choice = page_key
+    st.session_state.nav_module = module_name
+    if page_key in BASE_SETTINGS_PAGE_TABS:
+        st.session_state["base_settings_active_tab"] = BASE_SETTINGS_PAGE_TABS[page_key]
+
+
 def render_sidebar():
     with st.sidebar:
         st.markdown(
@@ -2034,12 +2044,14 @@ def render_sidebar():
                 st.markdown(f'<div class="nav-section-title">{section}</div>', unsafe_allow_html=True)
                 for item in items:
                     item_type = "primary" if current == item else "secondary"
-                    if st.button(labels[item], key=f"nav_{item}", type=item_type, use_container_width=True):
-                        st.session_state.nav_choice = item
-                        st.session_state.nav_module = page_module.get(item, module_name)
-                        if item in BASE_SETTINGS_PAGE_TABS:
-                            st.session_state["base_settings_active_tab"] = BASE_SETTINGS_PAGE_TABS[item]
-                        st.rerun()
+                    st.button(
+                        labels[item],
+                        key=f"nav_{item}",
+                        type=item_type,
+                        use_container_width=True,
+                        on_click=_set_sidebar_page,
+                        args=(item, page_module.get(item, module_name)),
+                    )
 
         st.markdown('<div class="sidebar-note">本地数据仓库 · SQLite</div>', unsafe_allow_html=True)
     return current
@@ -3726,6 +3738,7 @@ def _render_fixed_template_sheet(
     key_prefix: str,
     min_col: int | None = None,
     max_col: int | None = None,
+    table_skin: str | None = None,
 ) -> None:
     try:
         sheet = load_template_sheet(sheet_name, min_col=min_col, max_col=max_col)
@@ -3742,22 +3755,993 @@ def _render_fixed_template_sheet(
         key=f"{key_prefix}_download_template",
         use_container_width=True,
     )
-    st.markdown(sheet.html, unsafe_allow_html=True)
+    html = _picture_brief_template_skin_html(sheet.html) if table_skin == "picture_brief" else sheet.html
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def _picture_brief_template_skin_html(sheet_html: str) -> str:
+    return f"""
+    <style>
+      .picture-brief-template-skin .template-sheet-wrap {{
+        overflow: auto;
+        border: 1px solid #dbe5f2;
+        background: #ffffff;
+        max-height: 76vh;
+        padding: 0;
+        border-radius: 8px;
+        box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
+      }}
+      .picture-brief-template-skin .template-sheet {{
+        border-collapse: collapse;
+        border-spacing: 0;
+        width: max-content;
+        min-width: 100%;
+        background: #ffffff;
+        box-shadow: none;
+      }}
+      .picture-brief-template-skin .template-sheet td {{
+        box-sizing: border-box;
+        border: 1px solid #dbe5f2 !important;
+        padding: 7px 10px !important;
+        min-width: 64px;
+        line-height: 1.32;
+        white-space: pre-wrap;
+        overflow: visible;
+        vertical-align: middle !important;
+        background-color: #ffffff !important;
+        color: #10233f !important;
+      }}
+      .picture-brief-template-skin .template-sheet tbody tr:nth-child(even) td {{
+        background-color: #fbfdff !important;
+      }}
+      .picture-brief-template-skin .template-sheet tbody tr:first-child td,
+      .picture-brief-template-skin .template-sheet tr.template-header-row td,
+      .picture-brief-template-skin .template-sheet tr.template-section-row td {{
+        background: #eaf2ff !important;
+        color: #10233f !important;
+        font-weight: 800 !important;
+        text-align: center !important;
+        border-bottom: 1px solid #c9d8ec !important;
+        height: 42px;
+      }}
+      .picture-brief-template-skin .template-sheet tr.template-section-row td {{
+        background: #f2f7ff !important;
+      }}
+      .picture-brief-template-skin .template-sheet td.numeric-cell {{
+        text-align: right !important;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }}
+      .picture-brief-template-skin .template-sheet tr.template-risk-row td {{
+        background-color: #fff1f1 !important;
+      }}
+      .picture-brief-template-skin .template-sheet td.negative-cell {{
+        color: #d92d20 !important;
+        background-color: #fff7f7 !important;
+        font-weight: 750 !important;
+      }}
+      .picture-brief-template-skin .template-sheet tr.template-total-row td {{
+        font-weight: 800 !important;
+        background-color: #edf5ff !important;
+        border-top: 2px solid #bad3f6 !important;
+      }}
+    </style>
+    <div class="picture-brief-template-skin">{sheet_html}</div>
+    """
+
+
+PICTURE_BRIEF_SECTION_TITLES = ["素质中心报告", "其他模块报告", "对外投资情况", "各校区具体情况"]
+PICTURE_BRIEF_OPERATING_ITEMS = ["收入合计", "净利润", "人工", "房租水电", "成本费用合计"]
+
+
+def _picture_brief_columns(brief_type: str) -> tuple[int, int]:
+    return (13, 20) if brief_type == "本年累计" else (2, 9)
+
+
+def _picture_brief_text(value) -> str:
+    try:
+        if value is None or pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        return ""
+    return str(value).strip()
+
+
+def _picture_brief_load_grid(brief_type: str) -> pd.DataFrame:
+    min_col, max_col = _picture_brief_columns(brief_type)
+    frame = load_template_sheet_frame("图片简报", formatted=True)
+    columns = list(frame.columns)[min_col - 1:max_col]
+    return frame.loc[:, columns].map(_picture_brief_text)
+
+
+def _picture_brief_row_values(grid: pd.DataFrame, row_idx: int) -> list[str]:
+    return [_picture_brief_text(value) for value in grid.iloc[row_idx].tolist()]
+
+
+def _picture_brief_is_blank_row(values: list[str]) -> bool:
+    return not any(_picture_brief_text(value) for value in values)
+
+
+def _picture_brief_find_row(grid: pd.DataFrame, title: str) -> int | None:
+    target = _picture_brief_text(title)
+    for idx in range(len(grid)):
+        if target in {_picture_brief_text(value) for value in grid.iloc[idx].tolist()}:
+            return idx
+    return None
+
+
+def _picture_brief_is_numeric_text(value: str) -> bool:
+    text = _picture_brief_text(value)
+    if not text or not any(char.isdigit() for char in text):
+        return False
+    normalized = text.replace(",", "").replace("，", "").replace(" ", "")
+    return bool(pd.notna(normalized)) and bool(re.fullmatch(r"[￥¥$€£()（）+\-–—\d.％%#DIV/0!]+", normalized))
+
+
+def _picture_brief_is_negative_text(value: str) -> bool:
+    text = _picture_brief_text(value).replace(",", "").replace("，", "").replace(" ", "")
+    return text.startswith(("-", "−", "–", "—")) or (
+        text.startswith(("(", "（")) and text.endswith((")", "）"))
+    )
+
+
+def _picture_brief_row_class(values: list[str]) -> str:
+    joined = "".join(values)
+    first = next((value for value in values if value), "")
+    classes: list[str] = []
+    if first in {"类别", "校区"}:
+        classes.append("picture-brief-header-row")
+    if first and (first in PICTURE_BRIEF_SECTION_TITLES or first == "集团经营情况"):
+        classes.append("picture-brief-section-row")
+    if any(token in joined for token in ("合计", "总计", "小计", "收入总额", "成本费用合计", "收入合计")):
+        classes.append("picture-brief-total-row")
+    if any(_picture_brief_is_negative_text(value) for value in values) and any(
+        token in joined for token in ("净利润", "净利率", "亏损")
+    ):
+        classes.append("picture-brief-risk-row")
+    return " ".join(classes)
+
+
+def _picture_brief_metric_pairs(values: list[str]) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    idx = 0
+    while idx < len(values) - 1:
+        label = _picture_brief_text(values[idx])
+        value = ""
+        value_idx = idx + 1
+        for candidate_idx in range(idx + 1, min(idx + 4, len(values))):
+            candidate = _picture_brief_text(values[candidate_idx])
+            if not candidate:
+                continue
+            if _picture_brief_is_numeric_text(candidate) or any(char.isdigit() for char in candidate):
+                value = candidate
+                value_idx = candidate_idx
+            break
+        if label and value and not _picture_brief_is_numeric_text(label):
+            pairs.append((label, value))
+            idx = value_idx + 1
+        else:
+            idx += 1
+    return pairs
+
+
+def _picture_brief_kpi_labels(brief_type: str) -> list[str]:
+    if brief_type == "本年累计":
+        return ["本年累计收入", "经营净利润", "净利率", "人工", "租金", "成本费用合计"]
+    return ["本月经营收入", "经营净利润", "净利率", "人工", "租金", "成本费用合计"]
+
+
+def _picture_brief_kpis(grid: pd.DataFrame, brief_type: str = "月报") -> list[tuple[str, str]]:
+    start = _picture_brief_find_row(grid, "集团经营情况")
+    if start is None:
+        return []
+    next_sections = [
+        idx for title in PICTURE_BRIEF_SECTION_TITLES
+        if (idx := _picture_brief_find_row(grid, title)) is not None and idx > start
+    ]
+    end = min(next_sections) if next_sections else min(start + 6, len(grid))
+    pairs: list[tuple[str, str]] = []
+    for row_idx in range(start + 1, end):
+        values = _picture_brief_row_values(grid, row_idx)
+        if _picture_brief_is_blank_row(values):
+            continue
+        pairs.extend(_picture_brief_metric_pairs(values))
+    wanted = _picture_brief_kpi_labels(brief_type)
+    by_label = {label: value for label, value in pairs}
+    return [(label, by_label.get(label, "-")) for label in wanted]
+
+
+def _picture_brief_db_signature() -> tuple[str, int]:
+    path = get_db_path()
+    try:
+        return str(path), path.stat().st_mtime_ns
+    except OSError:
+        return str(path), 0
+
+
+def _picture_brief_pl_detail_rows(period: str) -> pd.DataFrame:
+    db_path, db_mtime = _picture_brief_db_signature()
+    return _picture_brief_pl_detail_rows_cached(str(period), db_path, db_mtime).copy(deep=True)
+
+
+@st.cache_data(show_spinner=False)
+def _picture_brief_pl_detail_rows_cached(period: str, db_path: str, db_mtime: int) -> pd.DataFrame:
+    params = {"period": period}
+    item_sql = _sql_in(PICTURE_BRIEF_OPERATING_ITEMS, "picture_item", params)
+    try:
+        return execute_sql(
+            f"""
+            SELECT
+                id,
+                company_code,
+                item_code,
+                item_name,
+                amount,
+                ytd_amount
+            FROM pl_detail
+            WHERE period = :period
+              AND item_name IN ({item_sql})
+            """,
+            params,
+        )
+    except Exception:
+        return pd.DataFrame(columns=["id", "company_code", "item_code", "item_name", "amount", "ytd_amount"])
+
+
+def _picture_brief_preferred_pl_rows(rows: pd.DataFrame) -> pd.DataFrame:
+    if len(rows) == 0:
+        return rows.copy()
+    df = rows.copy()
+    df["company_code"] = df.get("company_code", "").astype(str)
+    df["item_name"] = df.get("item_name", "").astype(str)
+    item_code = df.get("item_code", pd.Series([""] * len(df))).fillna("").astype(str)
+    df["_priority"] = item_code.map(
+        lambda value: 0 if value.startswith("OPERATING_") else (1 if value.startswith("SUMMARY_") else 2)
+    )
+    df["_row_id"] = pd.to_numeric(df.get("id", pd.Series(range(len(df)))), errors="coerce").fillna(0)
+    df = df.sort_values(["company_code", "item_name", "_priority", "_row_id"], ascending=[True, True, False, True])
+    return df.groupby(["company_code", "item_name"], as_index=False, group_keys=False).tail(1)
+
+
+def _picture_brief_amount_text(value: float) -> str:
+    try:
+        amount_wan = float(value) / 10000
+        amount = int(amount_wan + 0.5) if amount_wan >= 0 else int(amount_wan - 0.5)
+        if amount == 0:
+            amount = 0
+        return f"{amount:,.0f}"
+    except (TypeError, ValueError):
+        return "-"
+
+
+def _picture_brief_ratio_text(numerator: float, denominator: float) -> str:
+    if not denominator:
+        return "-"
+    return f"{numerator / denominator * 100:.0f}%"
+
+
+def _picture_brief_scope_values(rows: pd.DataFrame, company_codes: list[str] | None, use_ytd: bool) -> dict[str, float]:
+    if len(rows) == 0:
+        return {item: 0.0 for item in PICTURE_BRIEF_OPERATING_ITEMS}
+    df = _picture_brief_preferred_pl_rows(rows)
+    if company_codes is not None:
+        code_set = {str(code) for code in company_codes}
+        df = df[df["company_code"].astype(str).isin(code_set)]
+    amount_col = "ytd_amount" if use_ytd else "amount"
+    if amount_col not in df.columns:
+        amount_col = "amount"
+    df["_metric_amount"] = pd.to_numeric(df[amount_col], errors="coerce")
+    if amount_col == "ytd_amount":
+        fallback = pd.to_numeric(df.get("amount", 0), errors="coerce")
+        df["_metric_amount"] = df["_metric_amount"].fillna(fallback)
+    totals = df.groupby("item_name")["_metric_amount"].sum().to_dict()
+    return {item: _safe_float(totals.get(item)) for item in PICTURE_BRIEF_OPERATING_ITEMS}
+
+
+def _picture_brief_company_descendants(root_code: str, include_root: bool = False) -> list[str]:
+    db_path, db_mtime = _picture_brief_db_signature()
+    companies = _picture_brief_company_tree_rows_cached(db_path, db_mtime)
+    return _picture_brief_company_descendants_from_rows(companies, root_code, include_root)
+
+
+@st.cache_data(show_spinner=False)
+def _picture_brief_company_tree_rows_cached(db_path: str, db_mtime: int) -> pd.DataFrame:
+    try:
+        return execute_sql("SELECT code, parent_code FROM companies")
+    except Exception:
+        return pd.DataFrame(columns=["code", "parent_code"])
+
+
+def _picture_brief_company_descendants_from_rows(
+    companies: pd.DataFrame, root_code: str, include_root: bool = False
+) -> list[str]:
+    if len(companies) == 0:
+        return [root_code] if include_root else []
+    children: dict[str, list[str]] = {}
+    for _, row in companies.iterrows():
+        code = str(row.get("code") or "")
+        parent = str(row.get("parent_code") or "")
+        if code:
+            children.setdefault(parent, []).append(code)
+    result: list[str] = [root_code] if include_root else []
+    stack = list(children.get(str(root_code), []))
+    seen = set(result)
+    while stack:
+        code = stack.pop(0)
+        if code in seen:
+            continue
+        seen.add(code)
+        result.append(code)
+        stack.extend(children.get(code, []))
+    return result
+
+
+def _picture_brief_kpis_from_pl_rows(rows: pd.DataFrame, brief_type: str) -> list[tuple[str, str]]:
+    use_ytd = brief_type == "本年累计"
+    values = _picture_brief_scope_values(rows, None, use_ytd)
+    revenue = values.get("收入合计", 0.0)
+    profit = values.get("净利润", 0.0)
+    labels = _picture_brief_kpi_labels(brief_type)
+    value_by_label = {
+        "本月经营收入": _picture_brief_amount_text(revenue),
+        "本年累计收入": _picture_brief_amount_text(revenue),
+        "经营净利润": _picture_brief_amount_text(profit),
+        "净利率": _picture_brief_ratio_text(profit, revenue),
+        "人工": _picture_brief_amount_text(values.get("人工", 0.0)),
+        "租金": _picture_brief_amount_text(values.get("房租水电", 0.0)),
+        "成本费用合计": _picture_brief_amount_text(values.get("成本费用合计", 0.0)),
+    }
+    return [(label, value_by_label.get(label, "-")) for label in labels]
+
+
+def _picture_brief_kpis_from_pl_detail(period: str, brief_type: str) -> list[tuple[str, str]]:
+    return _picture_brief_kpis_from_pl_rows(_picture_brief_pl_detail_rows(period), brief_type)
+
+
+def _picture_brief_quality_section_from_pl_rows(
+    rows: pd.DataFrame, brief_type: str, company_tree: pd.DataFrame | None = None
+) -> list[list[str]]:
+    use_ytd = brief_type == "本年累计"
+    if company_tree is None:
+        descendants = _picture_brief_company_descendants
+    else:
+        descendants = lambda code, include_root=False: _picture_brief_company_descendants_from_rows(
+            company_tree, code, include_root
+        )
+    scopes = [
+        ("素质中心", descendants("10101", include_root=False)),
+        ("尔遇", descendants("10204", include_root=False)),
+        ("尔遇管理中心", ["10204"]),
+        ("管理中心", ["101"]),
+    ]
+    values_by_scope = [(label, _picture_brief_scope_values(rows, codes, use_ytd)) for label, codes in scopes]
+    merged = {item: sum(values.get(item, 0.0) for _, values in values_by_scope) for item in PICTURE_BRIEF_OPERATING_ITEMS}
+
+    def row_for(label: str, item: str) -> list[str]:
+        values = [_picture_brief_amount_text(scope_values.get(item, 0.0)) for _, scope_values in values_by_scope]
+        return [label, *values, _picture_brief_amount_text(merged.get(item, 0.0)), "", ""]
+
+    revenue_values = [scope_values.get("收入合计", 0.0) for _, scope_values in values_by_scope]
+    profit_values = [scope_values.get("净利润", 0.0) for _, scope_values in values_by_scope]
+    margin_row = [
+        "净利率",
+        *[_picture_brief_ratio_text(profit, revenue) for profit, revenue in zip(profit_values, revenue_values)],
+        _picture_brief_ratio_text(merged.get("净利润", 0.0), merged.get("收入合计", 0.0)),
+        "",
+        "",
+    ]
+    return [
+        ["类别", "素质中心", "尔遇", "尔遇管理中心", "管理中心", "合并统计", "同比增长", "收入占比"],
+        row_for("收入", "收入合计"),
+        row_for("净利润", "净利润"),
+        margin_row,
+        row_for("人工", "人工"),
+        row_for("租金", "房租水电"),
+    ]
+
+
+def _picture_brief_quality_section_from_pl_detail(period: str, brief_type: str) -> list[list[str]]:
+    return _picture_brief_quality_section_from_pl_rows(_picture_brief_pl_detail_rows(period), brief_type)
+
+
+def _picture_brief_operating_context(period: str) -> dict[str, list]:
+    rows = _picture_brief_pl_detail_rows(period)
+    db_path, db_mtime = _picture_brief_db_signature()
+    company_tree = _picture_brief_company_tree_rows_cached(db_path, db_mtime)
+    month_quality_rows = _picture_brief_quality_section_from_pl_rows(rows, "月报", company_tree)
+    ytd_quality_rows = _picture_brief_quality_section_from_pl_rows(rows, "本年累计", company_tree)
+    return {
+        "month_kpis": _picture_brief_kpis_from_pl_rows(rows, "月报"),
+        "ytd_kpis": _picture_brief_kpis_from_pl_rows(rows, "本年累计"),
+        "month_quality_rows": month_quality_rows,
+        "ytd_quality_rows": ytd_quality_rows,
+    }
+
+
+def _picture_brief_section_table(grid: pd.DataFrame, title: str) -> list[list[str]]:
+    start = _picture_brief_find_row(grid, title)
+    if start is None:
+        return []
+    following = [
+        idx for other_title in PICTURE_BRIEF_SECTION_TITLES
+        if other_title != title and (idx := _picture_brief_find_row(grid, other_title)) is not None and idx > start
+    ]
+    end = min(following) if following else len(grid)
+    rows: list[list[str]] = []
+    for row_idx in range(start + 1, end):
+        values = _picture_brief_row_values(grid, row_idx)
+        if _picture_brief_is_blank_row(values):
+            continue
+        rows.append(values)
+    return _picture_brief_clean_section_rows(rows)
+
+
+def _picture_brief_is_note_row(values: list[str]) -> bool:
+    first = next((_picture_brief_text(value) for value in values if _picture_brief_text(value)), "")
+    return first == "月份" or first.startswith("@") or first.startswith("第")
+
+
+def _picture_brief_clean_section_rows(rows: list[list[str]]) -> list[list[str]]:
+    data_rows = [row for row in rows if not _picture_brief_is_note_row(row)]
+    if not data_rows:
+        return []
+    max_cols = max(len(row) for row in data_rows)
+    normalized = [row + [""] * (max_cols - len(row)) for row in data_rows]
+    keep_indices = [
+        idx for idx in range(max_cols)
+        if any(_picture_brief_text(row[idx]) for row in normalized)
+    ]
+    return [[row[idx] for idx in keep_indices] for row in normalized]
+
+
+def _picture_brief_section_lookup(rows: list[list[str]], row_label: str, col_label: str) -> str:
+    if not rows:
+        return "-"
+    header = rows[0]
+    col_idx = next((idx for idx, value in enumerate(header) if _picture_brief_text(value) == col_label), None)
+    if col_idx is None:
+        return "-"
+    for row in rows[1:]:
+        if row and _picture_brief_text(row[0]) == row_label and col_idx < len(row):
+            return _picture_brief_text(row[col_idx]) or "-"
+    return "-"
+
+
+def _picture_brief_note_line(grid: pd.DataFrame, label: str, brief_type: str) -> str:
+    kpis = dict(_picture_brief_kpis(grid, brief_type))
+    quality_rows = _picture_brief_section_table(grid, "素质中心报告")
+    other_rows = _picture_brief_section_table(grid, "其他模块报告")
+    revenue = kpis.get("本月经营收入") or kpis.get("本年累计收入", "-")
+    profit = kpis.get("经营净利润", "-")
+    margin = kpis.get("净利率", "-")
+    quality_revenue = _picture_brief_section_lookup(quality_rows, "收入", "合并统计")
+    quality_profit = _picture_brief_section_lookup(quality_rows, "净利润", "合并统计")
+    bookstore_revenue = _picture_brief_section_lookup(other_rows, "收入", "尔遇书城")
+    bookstore_profit = _picture_brief_section_lookup(other_rows, "净利润", "尔遇书城")
+    if all(value in {"", "-"} for value in [revenue, profit, margin, quality_revenue, quality_profit]):
+        return ""
+    return (
+        f"{label}：集团收入 {revenue}，净利润 {profit}，净利率 {margin}；"
+        f"素质中心合并收入 {quality_revenue}，净利润 {quality_profit}；"
+        f"尔遇书城收入 {bookstore_revenue}，净利润 {bookstore_profit}。"
+    )
+
+
+def _picture_brief_auto_note_html(month_grid: pd.DataFrame, ytd_grid: pd.DataFrame) -> str:
+    lines = [
+        line for line in [
+            _picture_brief_note_line(month_grid, "本月口径", "月报"),
+            _picture_brief_note_line(ytd_grid, "本年累计口径", "本年累计"),
+        ] if line
+    ]
+    if not lines:
+        lines = ["暂无足够数据生成说明。"]
+    items = "".join(f"<li>{_html(line)}</li>" for line in lines)
+    return f"""
+    <section class="picture-brief-note">
+      <h3>经营简报说明</h3>
+      <ul>{items}</ul>
+    </section>
+    """
+
+
+def _picture_brief_generated_note_html(
+    month_kpis: list[tuple[str, str]],
+    ytd_kpis: list[tuple[str, str]],
+    month_quality_rows: list[list[str]],
+    ytd_quality_rows: list[list[str]],
+) -> str:
+    month = dict(month_kpis)
+    ytd = dict(ytd_kpis)
+    month_quality_revenue = _picture_brief_section_lookup(month_quality_rows, "收入", "合并统计")
+    month_quality_profit = _picture_brief_section_lookup(month_quality_rows, "净利润", "合并统计")
+    ytd_quality_revenue = _picture_brief_section_lookup(ytd_quality_rows, "收入", "合并统计")
+    ytd_quality_profit = _picture_brief_section_lookup(ytd_quality_rows, "净利润", "合并统计")
+    lines = [
+        (
+            f"本月口径：集团收入 {month.get('本月经营收入', '-')} 万，"
+            f"净利润 {month.get('经营净利润', '-')} 万，净利率 {month.get('净利率', '-')}；"
+            f"素质中心/尔遇/管理中心合并收入 {month_quality_revenue} 万，净利润 {month_quality_profit} 万。"
+        ),
+        (
+            f"本年累计口径：集团收入 {ytd.get('本年累计收入', '-')} 万，"
+            f"净利润 {ytd.get('经营净利润', '-')} 万，净利率 {ytd.get('净利率', '-')}；"
+            f"素质中心/尔遇/管理中心合并收入 {ytd_quality_revenue} 万，净利润 {ytd_quality_profit} 万。"
+        ),
+    ]
+    items = "".join(f"<li>{_html(line)}</li>" for line in lines)
+    return f"""
+    <section class="picture-brief-note">
+      <h3>经营简报说明</h3>
+      <ul>{items}</ul>
+    </section>
+    """
+
+
+def _picture_brief_cell_html(value: str) -> str:
+    classes: list[str] = []
+    if _picture_brief_is_numeric_text(value):
+        classes.append("picture-brief-num")
+    if _picture_brief_is_negative_text(value):
+        classes.append("picture-brief-negative")
+    class_attr = f' class="{" ".join(classes)}"' if classes else ""
+    return f"<td{class_attr}>{_html(value)}</td>"
+
+
+def _picture_brief_table_html(title: str, rows: list[list[str]]) -> str:
+    if not rows:
+        return f"""
+        <section class="picture-brief-section">
+          <h3>{_html(title)}</h3>
+          <div class="picture-brief-empty">暂无数据</div>
+        </section>
+        """
+    column_count = max(len(row) for row in rows)
+    table_min_width = 170 + max(column_count - 1, 0) * 138
+    colgroup = (
+        "<colgroup>"
+        '<col class="picture-brief-first-col">'
+        + "".join('<col class="picture-brief-data-col">' for _ in range(max(column_count - 1, 0)))
+        + "</colgroup>"
+    )
+    body = []
+    for row_idx, raw_values in enumerate(rows):
+        values = raw_values + [""] * (column_count - len(raw_values))
+        row_classes = _picture_brief_row_class(values)
+        if row_idx == 0 and "picture-brief-header-row" not in row_classes:
+            row_classes = f"{row_classes} picture-brief-header-row".strip()
+        class_attr = f' class="{row_classes}"' if row_classes else ""
+        body.append(f"<tr{class_attr}>{''.join(_picture_brief_cell_html(value) for value in values)}</tr>")
+    section_class = "picture-brief-section picture-brief-campus-section" if title == "各校区具体情况" else "picture-brief-section"
+    table_class = "picture-brief-table picture-brief-campus-table" if title == "各校区具体情况" else "picture-brief-table"
+    return f"""
+    <section class="{section_class}">
+      <h3>{_html(title)}</h3>
+      <div class="picture-brief-table-scroll">
+        <table class="{table_class}" style="min-width:{table_min_width}px">
+          {colgroup}
+          <tbody>{''.join(body)}</tbody>
+        </table>
+      </div>
+    </section>
+    """
+
+
+def _picture_brief_styles() -> str:
+    return """
+    <style>
+      .picture-brief-filter {
+        display: grid;
+        grid-template-columns: minmax(120px, .8fr) minmax(120px, .8fr) minmax(190px, 1.1fr) auto;
+        gap: 12px;
+        align-items: end;
+        margin: 8px 0 14px;
+      }
+      .picture-brief-page-title {
+        font-size: 30px;
+        line-height: 1.25;
+      }
+      [data-testid="stMain"] .block-container {
+        max-width: min(100%, 1680px);
+        padding-left: 2rem;
+        padding-right: 2rem;
+      }
+      [data-testid="stMain"] label,
+      [data-testid="stMain"] [data-testid="stRadio"] p,
+      [data-testid="stMain"] [data-testid="stSelectbox"] p {
+        font-size: 15px;
+        font-weight: 750;
+      }
+      .picture-brief-kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(140px, 1fr));
+        gap: 10px;
+        margin: 10px 0 18px;
+        width: 100%;
+      }
+      .picture-brief-kpi {
+        background: #ffffff;
+        border: 1px solid #dbe5f2;
+        border-radius: 8px;
+        padding: 14px 15px;
+        box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
+      }
+      .picture-brief-kpi .label { color: #18314f; font-size: 15px; font-weight: 850; }
+      .picture-brief-kpi .value {
+        color: #1d4ed8;
+        font-size: 30px;
+        font-weight: 900;
+        margin-top: 6px;
+        letter-spacing: 0;
+      }
+      .picture-brief-kpi .picture-brief-kpi-primary { color: #1d4ed8; }
+      .picture-brief-kpi .picture-brief-kpi-positive { color: #16a34a; }
+      .picture-brief-kpi .picture-brief-kpi-negative { color: #dc2626; }
+      .picture-brief-section { margin: 18px 0 22px; width: 100%; }
+      .picture-brief-section h3 {
+        margin: 0 0 8px;
+        color: #10233f;
+        font-size: 21px;
+        font-weight: 850;
+        padding-bottom: 8px;
+        border-bottom: 1px solid #dbe5f2;
+      }
+      .picture-brief-table-scroll { overflow-x: auto; width: 100%; }
+      .picture-brief-table {
+        width: 100%;
+        min-width: 720px;
+        table-layout: fixed;
+        border-collapse: collapse;
+        border-spacing: 0;
+        background: #ffffff;
+        color: #10233f;
+        font-size: 16px;
+      }
+      .picture-brief-table col.picture-brief-first-col { width: 170px; }
+      .picture-brief-table col.picture-brief-data-col { width: 138px; }
+      .picture-brief-table td {
+        border: 1px solid #dbe5f2;
+        padding: 9px 11px;
+        line-height: 1.42;
+        vertical-align: middle;
+        white-space: pre-wrap;
+        overflow: visible;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        text-align: center;
+      }
+      .picture-brief-table tr:nth-child(even) td { background: #fbfdff; }
+      .picture-brief-table tr.picture-brief-header-row td,
+      .picture-brief-table tr.picture-brief-section-row td {
+        background: #eaf2ff;
+        color: #10233f;
+        font-weight: 850;
+        text-align: center;
+      }
+      .picture-brief-table tr.picture-brief-total-row td {
+        background: #edf5ff;
+        font-weight: 850;
+        border-top: 2px solid #bad3f6;
+      }
+      .picture-brief-table tr.picture-brief-risk-row td { background: #fff1f1; }
+      .picture-brief-table td.picture-brief-num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .picture-brief-table td.picture-brief-negative {
+        color: #d92d20;
+        background: #fff7f7;
+        font-weight: 800;
+      }
+      .picture-brief-empty {
+        color: #64748b;
+        border: 1px dashed #cbd5e1;
+        padding: 12px;
+        background: #ffffff;
+      }
+      .picture-brief-campus-table td {
+        max-width: none;
+      }
+      .picture-brief-campus-table {
+        min-width: 920px;
+      }
+      .picture-brief-campus-table td:nth-child(1),
+      .picture-brief-campus-table td:nth-child(5) {
+        text-align: center;
+        white-space: normal;
+        word-break: break-word;
+      }
+      .picture-brief-note {
+        margin-top: 18px;
+        padding-top: 12px;
+        border-top: 1px solid #dbe5f2;
+        color: #10233f;
+      }
+      .picture-brief-note h3 {
+        margin: 0 0 8px;
+        font-size: 21px;
+        font-weight: 850;
+      }
+      .picture-brief-note ul {
+        margin: 0;
+        padding-left: 20px;
+      }
+      .picture-brief-note li {
+        margin: 4px 0;
+        line-height: 1.62;
+        font-size: 16px;
+      }
+      .picture-brief-trend {
+        margin-top: 20px;
+        padding-top: 12px;
+        border-top: 1px solid #dbe5f2;
+        width: 100%;
+      }
+      .picture-brief-trend h3 {
+        font-size: 21px;
+        font-weight: 850;
+      }
+      .picture-brief-trend-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+        width: 100%;
+      }
+      .picture-brief-trend-note {
+        margin: 8px 0 0;
+        color: #334155;
+        font-size: 15px;
+        line-height: 1.5;
+      }
+      @media (max-width: 1180px) {
+        .picture-brief-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .picture-brief-filter { grid-template-columns: 1fr 1fr; }
+        .picture-brief-trend-grid { grid-template-columns: 1fr; }
+      }
+    </style>
+    """
+
+
+def _picture_brief_kpi_value_class(label: str, value: str) -> str:
+    if _picture_brief_is_negative_text(value):
+        return "picture-brief-kpi-negative"
+    if label in {"净利率", "已完成比例"} and value not in {"", "-"}:
+        return "picture-brief-kpi-positive"
+    return "picture-brief-kpi-primary"
+
+
+def _picture_brief_kpi_html(kpis: list[tuple[str, str]]) -> str:
+    cards = "".join(
+        (
+            f'<div class="picture-brief-kpi"><div class="label">{_html(label)}</div>'
+            f'<div class="value {_picture_brief_kpi_value_class(label, value)}">{_html(value)}</div></div>'
+        )
+        for label, value in kpis
+    )
+    return f'<div class="picture-brief-kpi-grid">{cards}</div>'
+
+
+def _picture_brief_trend_frame(selected_year: str, selected_month: str) -> pd.DataFrame:
+    periods = [
+        period for period in get_dashboard_periods()
+        if str(period).startswith(str(selected_year)) and str(period)[4:6] <= str(selected_month).zfill(2)
+    ]
+    periods = sorted(set(str(period) for period in periods))
+    if len(periods) < 2:
+        return pd.DataFrame(columns=["期间", "收入", "累计收入", "净利润", "净利率"])
+
+    params: dict = {"income_item": INCOME_ITEM, "profit_item": NET_PROFIT_ITEM}
+    period_sql = _sql_in(periods, "picture_period", params)
+    try:
+        df = execute_sql(
+            f"""
+            SELECT
+                period,
+                SUM(CASE WHEN item_name = :income_item THEN period1_value ELSE 0 END) AS revenue,
+                SUM(CASE WHEN item_name = :profit_item THEN period1_value ELSE 0 END) AS net_profit
+            FROM income_statement
+            WHERE period IN ({period_sql})
+            GROUP BY period
+            ORDER BY period
+            """,
+            params,
+        )
+    except Exception:
+        df = pd.DataFrame()
+    if len(df) == 0:
+        return pd.DataFrame(columns=["期间", "收入", "累计收入", "净利润", "净利率"])
+
+    rows: list[dict] = []
+    for _, item in df.iterrows():
+        period = str(item.get("period") or "")
+        if not period:
+            continue
+        revenue = _safe_float(item.get("revenue"))
+        net_profit = _safe_float(item.get("net_profit"))
+        rows.append(
+            {
+                "期间": period,
+                "收入": revenue,
+                "净利润": net_profit,
+                "净利率": net_profit / revenue if revenue else 0.0,
+            }
+        )
+    trend_df = pd.DataFrame(rows).sort_values("期间")
+    if len(trend_df) == 0:
+        return pd.DataFrame(columns=["期间", "收入", "累计收入", "净利润", "净利率"])
+    trend_df["累计收入"] = trend_df["收入"].cumsum()
+    return trend_df
+
+
+def _picture_brief_change_text(current: float, previous: float) -> str:
+    if previous == 0:
+        return "暂无可比变化"
+    change = (current - previous) / abs(previous)
+    direction = "上升" if change >= 0 else "下降"
+    return f"{direction} {abs(change) * 100:.1f}%"
+
+
+def _picture_brief_trend_conclusions(trend_df: pd.DataFrame) -> dict[str, str]:
+    if len(trend_df) < 2:
+        return {}
+    ordered = trend_df.sort_values("期间").reset_index(drop=True)
+    current = ordered.iloc[-1]
+    previous = ordered.iloc[-2]
+    period_month = str(current.get("期间", ""))[4:6].lstrip("0") or str(current.get("期间", ""))
+    revenue_change = _picture_brief_change_text(_safe_float(current.get("收入")), _safe_float(previous.get("收入")))
+    profit_change = _picture_brief_change_text(_safe_float(current.get("净利润")), _safe_float(previous.get("净利润")))
+    margin_text = _fmt_percent(current.get("净利率"))
+    return {
+        "收入趋势": f"{period_month}月收入较上期{revenue_change}，累计收入为 {_fmt_money(current.get('累计收入'))}。",
+        "净利润趋势": f"{period_month}月净利润较上期{profit_change}，净利率为 {margin_text}。",
+    }
+
+
+def _render_picture_brief_trends(selected_year: str, selected_month: str) -> None:
+    st.markdown('<div class="picture-brief-trend"><h3>趋势图</h3></div>', unsafe_allow_html=True)
+    trend_df = _picture_brief_trend_frame(selected_year, selected_month)
+    if len(trend_df) == 0:
+        st.info("暂无足够多期数据生成趋势")
+        return
+    if go is None:
+        st.dataframe(trend_df, hide_index=True, use_container_width=True)
+        return
+    conclusions = _picture_brief_trend_conclusions(trend_df)
+    columns = st.columns(2)
+    st.markdown('<div class="picture-brief-trend-grid">', unsafe_allow_html=True)
+    with columns[0]:
+        revenue_fig = go.Figure()
+        revenue_fig.add_bar(
+            x=trend_df["期间"],
+            y=trend_df["收入"],
+            name="每月收入",
+            marker_color="#3b82f6",
+        )
+        revenue_fig.add_scatter(
+            x=trend_df["期间"],
+            y=trend_df["累计收入"],
+            name="累计收入",
+            mode="lines+markers",
+            line=dict(color="#1d4ed8", width=3),
+            yaxis="y2",
+        )
+        revenue_fig.update_layout(
+            title="收入趋势",
+            height=340,
+            margin=dict(l=8, r=8, t=42, b=8),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="#ffffff",
+            legend_title_text="",
+            yaxis_title="每月收入",
+            yaxis2=dict(title="累计收入", overlaying="y", side="right", showgrid=False),
+            font=dict(size=14, color="#10233f"),
+        )
+        st.plotly_chart(revenue_fig, use_container_width=True)
+        st.markdown(f'<div class="picture-brief-trend-note">{_html(conclusions.get("收入趋势", ""))}</div>', unsafe_allow_html=True)
+    with columns[1]:
+        profit_colors = ["#dc2626" if _safe_float(value) < 0 else "#16a34a" for value in trend_df["净利润"]]
+        profit_fig = go.Figure()
+        profit_fig.add_bar(
+            x=trend_df["期间"],
+            y=trend_df["净利润"],
+            name="每月净利润",
+            marker_color=profit_colors,
+        )
+        profit_fig.add_scatter(
+            x=trend_df["期间"],
+            y=trend_df["净利率"],
+            name="净利率",
+            mode="lines+markers",
+            line=dict(color="#f59e0b", width=3),
+            yaxis="y2",
+        )
+        profit_fig.update_layout(
+            title="净利润趋势",
+            height=340,
+            margin=dict(l=8, r=8, t=42, b=8),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="#ffffff",
+            legend_title_text="",
+            yaxis_title="每月净利润",
+            yaxis2=dict(title="净利率", overlaying="y", side="right", tickformat=".0%", showgrid=False),
+            font=dict(size=14, color="#10233f"),
+        )
+        st.plotly_chart(profit_fig, use_container_width=True)
+        st.markdown(f'<div class="picture-brief-trend-note">{_html(conclusions.get("净利润趋势", ""))}</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_multi_picture_brief():
-    st.markdown('<div class="page-header">图片简报</div>', unsafe_allow_html=True)
-    brief_type = st.radio(
-        "简报类型",
-        ["月报", "本年累计"],
-        horizontal=True,
-        label_visibility="collapsed",
-        key="multi_picture_brief_type",
-    )
-    if brief_type == "月报":
-        _render_fixed_template_sheet("图片简报", "multi_picture_template_month", min_col=2, max_col=9)
-    else:
-        _render_fixed_template_sheet("图片简报", "multi_picture_template_ytd", min_col=13, max_col=20)
+    st.markdown('<div class="page-header picture-brief-page-title">图片简报</div>', unsafe_allow_html=True)
+    st.markdown(_picture_brief_styles(), unsafe_allow_html=True)
+    periods = get_dashboard_periods()
+    latest_period = max(periods) if periods else "202603"
+    years = sorted({period[:4] for period in periods}, reverse=True) or [latest_period[:4]]
+    default_year_idx = years.index(latest_period[:4]) if latest_period[:4] in years else 0
+    selected_year = years[default_year_idx]
+    months = [period[4:6] for period in sorted(periods) if period.startswith(selected_year)] or [latest_period[4:6]]
+    default_month = latest_period[4:6] if latest_period[:4] == selected_year and latest_period[4:6] in months else months[-1]
+    col_year, col_month, col_type, col_query = st.columns([0.8, 0.8, 1.3, 0.8])
+    with col_year:
+        selected_year = st.selectbox("年份", years, index=default_year_idx, key="picture_brief_year")
+    months = [period[4:6] for period in sorted(periods) if period.startswith(selected_year)] or [default_month]
+    month_index = months.index(default_month) if default_month in months else len(months) - 1
+    with col_month:
+        selected_month = st.selectbox(
+            "月份",
+            months,
+            index=month_index,
+            format_func=lambda value: f"{int(value)}月" if str(value).isdigit() else str(value),
+            key="picture_brief_month",
+        )
+    with col_type:
+        brief_type = st.radio(
+            "简报类型",
+            ["月报", "本年累计"],
+            horizontal=True,
+            label_visibility="visible",
+            key="multi_picture_brief_type",
+        )
+    with col_query:
+        st.button("查询报表", type="primary", use_container_width=True, key="picture_brief_query")
+
+    for _ in range(24):
+        st.empty()
+
+    try:
+        grid = _picture_brief_load_grid(brief_type)
+    except TemplateWorkbookError as exc:
+        st.error(str(exc))
+        return
+
+    try:
+        template_bytes = read_template_bytes()
+        st.download_button(
+            "下载原始报表模板",
+            template_bytes,
+            file_name="报表模板.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="multi_picture_template_download_template",
+            use_container_width=True,
+        )
+    except TemplateWorkbookError:
+        pass
+
+    selected_period = f"{selected_year}{str(selected_month).zfill(2)}"
+    operating_context = _picture_brief_operating_context(selected_period)
+    month_kpis = operating_context["month_kpis"]
+    ytd_kpis = operating_context["ytd_kpis"]
+    current_kpis = ytd_kpis if brief_type == "本年累计" else month_kpis
+    month_quality_rows = operating_context["month_quality_rows"]
+    ytd_quality_rows = operating_context["ytd_quality_rows"]
+    current_quality_rows = ytd_quality_rows if brief_type == "本年累计" else month_quality_rows
+
+    _render_html(_picture_brief_kpi_html(current_kpis))
+    for section_title in PICTURE_BRIEF_SECTION_TITLES:
+        rows = current_quality_rows if section_title == "素质中心报告" else _picture_brief_section_table(grid, section_title)
+        _render_html(_picture_brief_table_html(section_title, rows))
+    _render_html(_picture_brief_generated_note_html(month_kpis, ytd_kpis, month_quality_rows, ytd_quality_rows))
 
 
 def render_multi_income_statement():
@@ -9220,8 +10204,10 @@ def main():
         "公司层级": render_company_hierarchy,
         "系统管理": render_admin,
     }
-    page_map.get(choice, render_home)()
-    render_footer()
+    page_slot = st.empty()
+    with page_slot.container():
+        page_map.get(choice, render_home)()
+        render_footer()
 
 if __name__ == "__main__":
     main()

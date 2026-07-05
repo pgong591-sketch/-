@@ -110,6 +110,17 @@ def test_base_settings_entries_use_render_base_settings_and_default_tab():
         assert f'"{key}": render_base_settings' in page_map_source
 
 
+def test_picture_brief_sidebar_click_updates_page_before_dispatch():
+    render_source = inspect.getsource(app.render_sidebar)
+    page_map_source = inspect.getsource(app.main)
+
+    assert '"多维图片简报": render_multi_picture_brief' in page_map_source
+    assert "on_click=_set_sidebar_page" in render_source
+    assert "args=(item, page_module.get(item, module_name))" in render_source
+    assert "page_slot = st.empty()" in page_map_source
+    assert '"多维图片简报": "图片简报"' in inspect.getsource(app)
+
+
 def test_no_single_module_pills_in_sidebar_source():
     source = inspect.getsource(app.render_sidebar)
 

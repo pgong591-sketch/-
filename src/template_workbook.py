@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from functools import lru_cache
 from html import escape
 import os
 from pathlib import Path
@@ -95,17 +96,35 @@ def get_template_workbook_path() -> Path:
 
 
 def read_template_bytes() -> bytes:
-    return get_template_workbook_path().read_bytes()
+    path = get_template_workbook_path()
+    return _read_template_bytes_cached(str(path), path.stat().st_mtime_ns)
 
 
-def load_template_sheet_frame(sheet_name: str) -> pd.DataFrame:
+def load_template_sheet_frame(sheet_name: str, formatted: bool = False) -> pd.DataFrame:
     """Load the exact sheet grid as rows and Excel column letters."""
+    path = get_template_workbook_path()
+    frame = _load_template_sheet_frame_cached(sheet_name, formatted, str(path), path.stat().st_mtime_ns)
+    return frame.copy(deep=True)
+
+
+@lru_cache(maxsize=8)
+def _read_template_bytes_cached(path_str: str, mtime_ns: int) -> bytes:
+    return Path(path_str).read_bytes()
+
+
+@lru_cache(maxsize=16)
+def _load_template_sheet_frame_cached(sheet_name: str, formatted: bool, path_str: str, mtime_ns: int) -> pd.DataFrame:
     value_ws, formula_ws, path, _ = _open_sheet_pair(sheet_name)
     rows: list[list[Any]] = []
     for row_idx in range(1, value_ws.max_row + 1):
         row: list[Any] = []
         for col_idx in range(1, value_ws.max_column + 1):
-            row.append(_cell_display_value(value_ws.cell(row_idx, col_idx), formula_ws.cell(row_idx, col_idx)))
+            value_cell = value_ws.cell(row_idx, col_idx)
+            formula_cell = formula_ws.cell(row_idx, col_idx)
+            row.append(
+                _cell_display_text(value_cell, formula_cell)
+                if formatted else _cell_display_value(value_cell, formula_cell)
+            )
         rows.append(row)
 
     columns = [get_column_letter(idx) for idx in range(1, value_ws.max_column + 1)]
@@ -114,6 +133,12 @@ def load_template_sheet_frame(sheet_name: str) -> pd.DataFrame:
     frame.attrs["source_path"] = str(path)
     frame.attrs["sheet_name"] = sheet_name
     return frame
+
+
+def clear_template_workbook_caches() -> None:
+    """Clear read-only template caches, mainly for tests after changing env/path."""
+    _read_template_bytes_cached.cache_clear()
+    _load_template_sheet_frame_cached.cache_clear()
 
 
 def load_template_sheet(
@@ -218,7 +243,9 @@ def _sheet_to_html(value_ws, formula_ws, min_row: int, max_row: int, min_col: in
     for row_idx in row_indices:
         height = value_ws.row_dimensions[row_idx].height
         row_style = f' style="height:{_points_to_px(height)}px"' if height else ""
-        cells = [f"<tr{row_style}>"]
+        row_class = _row_class(value_ws, formula_ws, row_idx, col_indices)
+        row_class_attr = f' class="{row_class}"' if row_class else ""
+        cells = [f"<tr{row_class_attr}{row_style}>"]
         for col_idx in col_indices:
             if (row_idx, col_idx) in merged_skip:
                 continue
@@ -236,6 +263,8 @@ def _sheet_to_html(value_ws, formula_ws, min_row: int, max_row: int, min_col: in
             is_numeric = _is_numeric_display_cell(value_cell, formula_cell)
             if is_numeric:
                 classes.append("numeric-cell")
+                if _is_negative_display_cell(value_cell, formula_cell):
+                    classes.append("negative-cell")
             class_attr = f' class="{" ".join(classes)}"' if classes else ""
             cells.append(f'<td{class_attr}{span_attrs} style="{_cell_style(formula_cell, value_cell, theme_colors, is_numeric=is_numeric)}">{value}</td>')
         cells.append("</tr>")
@@ -258,6 +287,32 @@ def _sheet_to_html(value_ws, formula_ws, min_row: int, max_row: int, min_col: in
         + "".join(rows)
         + "</table></div>"
     )
+
+
+def _row_class(value_ws, formula_ws, row_idx: int, col_indices: list[int]) -> str:
+    texts = [
+        _cell_display_text(value_ws.cell(row_idx, col_idx), formula_ws.cell(row_idx, col_idx))
+        for col_idx in col_indices
+    ]
+    joined = "".join(str(text) for text in texts)
+    first_text = next((str(text).strip() for text in texts if str(text).strip()), "")
+    classes: list[str] = []
+    if first_text in {"类别", "校区"}:
+        classes.append("template-header-row")
+    if first_text and (
+        first_text in {"集团经营情况", "素质中心报告", "其他模块报告", "对外投资情况", "各校区具体情况"}
+        or first_text.endswith("报告")
+    ):
+        classes.append("template-section-row")
+    if any(token in joined for token in ("合计", "总计", "小计")):
+        classes.append("template-total-row")
+    has_negative = any(
+        _is_negative_display_cell(value_ws.cell(row_idx, col_idx), formula_ws.cell(row_idx, col_idx))
+        for col_idx in col_indices
+    )
+    if has_negative and any(token in joined for token in ("净利润", "净利率", "亏损")):
+        classes.append("template-risk-row")
+    return " ".join(classes)
 
 
 def _column_width(ws, col_idx: int) -> int:
@@ -288,6 +343,19 @@ def _is_numeric_display_cell(value_cell, formula_cell) -> bool:
         return False
     normalized = text.replace(",", "").replace("，", "").replace(" ", "")
     return bool(re.fullmatch(r"[￥¥$€£()（）+\-–—\d.％%]+", normalized))
+
+
+def _is_negative_display_cell(value_cell, formula_cell) -> bool:
+    value = _cell_display_value(value_cell, formula_cell)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value) < 0
+    text = str(_format_value(value, formula_cell)).strip() if value not in (None, "") else ""
+    if not text:
+        return False
+    normalized = text.replace(",", "").replace("，", "").replace(" ", "")
+    return normalized.startswith(("-", "−", "–", "—")) or (
+        normalized.startswith(("(", "（")) and normalized.endswith((")", "）"))
+    )
 
 
 def _format_value(value: Any, cell) -> Any:
