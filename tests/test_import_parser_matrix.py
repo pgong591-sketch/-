@@ -4,6 +4,7 @@ import pandas as pd
 
 from src.import_parser import identify_report_type, parse_file
 from src.report_types import (
+    RT_BALANCE_SHEET,
     RT_MGMT_DEPT_INCOME_COST,
     RT_NON_SUBJECT_MGMT_DEPT_INCOME_COST,
     RT_NON_SUBJECT_TEACHING_FEE,
@@ -40,6 +41,44 @@ def test_identify_matrix_and_teaching_fee_by_preview():
 def test_identify_revenue_volume_by_original_filename():
     original_name = "202603收入人次表.xls"
     assert identify_report_type("tmp.xls", None, source_name=original_name) == RT_REVENUE_VOLUME
+
+
+def test_non_subject_management_center_balance_sheet_identifies_as_balance_sheet():
+    names = [
+        "非学科管理中心资产负债表.xlsx",
+        "非学科管理中心合并资产负债表.xlsx",
+        "202603非学科管理中心(K合01表)合并资产负债表.xlsx",
+    ]
+
+    for name in names:
+        assert identify_report_type("tmp.xlsx", None, source_name=name) == RT_BALANCE_SHEET
+
+
+def test_non_subject_management_center_income_cost_still_identifies_as_dept_report():
+    names = [
+        "202603非学科管理中心部门收入成本费用表.xlsx",
+        "202603非学科管理中心收入成本费用表.xlsx",
+        "202603非学科管理中心管理公司收入成本费用表.xlsx",
+    ]
+
+    for name in names:
+        assert identify_report_type("tmp.xlsx", None, source_name=name) == RT_NON_SUBJECT_MGMT_DEPT_INCOME_COST
+
+
+def test_management_center_balance_sheet_does_not_identify_as_dept_income_cost():
+    assert identify_report_type("tmp.xlsx", None, source_name="202603管理中心资产负债表.xlsx") == RT_BALANCE_SHEET
+
+
+def test_non_subject_management_center_company_name_does_not_override_common_report_types():
+    cases = [
+        ("202603非学科管理中心利润表.xlsx", "损益表"),
+        ("202603非学科管理中心损益表.xlsx", "损益表"),
+        ("202603非学科管理中心科目余额表.xlsx", "科目余额表"),
+        ("202603非学科管理中心现金流量表.xlsx", "现金流量表"),
+    ]
+
+    for name, expected in cases:
+        assert identify_report_type("tmp.xlsx", None, source_name=name) == expected
 
 
 def test_parse_real_matrix_workbooks_if_available():

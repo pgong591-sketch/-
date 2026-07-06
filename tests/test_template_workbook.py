@@ -316,6 +316,34 @@ def _picture_brief_pl_fixture() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _picture_brief_rows_for_metrics(metrics: dict[str, tuple[float, float, float, float]]) -> pd.DataFrame:
+    rows = []
+    row_id = 1
+    for code, (revenue, profit, ytd_revenue, ytd_profit) in metrics.items():
+        rows.extend(
+            [
+                {
+                    "id": row_id,
+                    "company_code": code,
+                    "item_code": f"OPERATING_{row_id:03d}",
+                    "item_name": "收入合计",
+                    "amount": revenue,
+                    "ytd_amount": ytd_revenue,
+                },
+                {
+                    "id": row_id + 1,
+                    "company_code": code,
+                    "item_code": f"OPERATING_{row_id + 1:03d}",
+                    "item_name": "净利润",
+                    "amount": profit,
+                    "ytd_amount": ytd_profit,
+                },
+            ]
+        )
+        row_id += 2
+    return pd.DataFrame(rows)
+
+
 def test_picture_brief_kpis_use_pl_detail_amount_and_ytd(monkeypatch):
     monkeypatch.setattr(app, "_picture_brief_pl_detail_rows", lambda period: _picture_brief_pl_fixture())
 
@@ -395,6 +423,144 @@ def test_picture_brief_operating_context_reuses_one_pl_detail_query(monkeypatch)
     assert dict(context["month_kpis"])["本月经营收入"] == "15"
     assert dict(context["ytd_kpis"])["本年累计收入"] == "45"
     assert context["month_quality_rows"][1] == ["收入", "3", "3", "4", "5", "15", "", ""]
+
+
+def test_picture_brief_other_module_section_uses_pl_detail_scopes():
+    rows = _picture_brief_rows_for_metrics(
+        {
+            "1010801": (100000, 10000, 300000, 20000),
+            "1010702": (200000, -20000, 400000, -50000),
+            "1010703": (300000, 30000, 600000, 80000),
+            "1011801": (400000, 40000, 700000, 90000),
+        }
+    )
+    company_tree = pd.DataFrame(
+        [
+            {"code": "1010801", "parent_code": "10108"},
+            {"code": "1011801", "parent_code": "10118"},
+        ]
+    )
+
+    section = app._picture_brief_mapped_section_from_pl_rows(
+        rows, "月报", app.PICTURE_BRIEF_OTHER_MODULE_SCOPES, company_tree, include_depreciation_row=True
+    )
+
+    assert section[0] == ["类别", "学校", "幼儿园", "尔遇书城", "茶山托育", "青少年宫", "探幽文旅"]
+    assert section[1] == ["收入", "10", "20", "待接入", "30", "40", "待接入"]
+    assert section[2] == ["净利润", "1", "-2", "待接入", "3", "4", "待接入"]
+    assert section[3] == ["净利率", "10%", "-10%", "-", "10%", "10%", "-"]
+    assert section[4] == ["折摊前净利润", "-", "-", "-", "-", "-", "-"]
+
+
+def test_picture_brief_investment_section_uses_pl_detail_and_marks_unknowns():
+    rows = _picture_brief_rows_for_metrics({"1010201": (500000, 50000, 900000, 90000)})
+    company_tree = pd.DataFrame(columns=["code", "parent_code"])
+
+    section = app._picture_brief_mapped_section_from_pl_rows(
+        rows, "月报", app.PICTURE_BRIEF_INVESTMENT_SCOPES, company_tree
+    )
+
+    assert section[0] == ["类别", "深圳卓越", "中科心研", "武汉均衡", "多彩维度", "凤来置业", "溢星空"]
+    assert section[1] == ["收入", "50", "待接入", "待确认", "待确认", "待接入", "待确认"]
+    assert section[2] == ["净利润", "5", "待接入", "待确认", "待确认", "待接入", "待确认"]
+    assert section[3] == ["净利率", "10%", "-", "-", "-", "-", "-"]
+
+
+def test_picture_brief_campus_section_uses_pl_detail_without_note_rows():
+    rows = _picture_brief_rows_for_metrics(
+        {
+            "101010120": (100000, 30000, 200000, 60000),
+            "101010128": (200000, 80000, 300000, 90000),
+            "1020401": (50000, -10000, 100000, -20000),
+        }
+    )
+    company_tree = pd.DataFrame(columns=["code", "parent_code"])
+
+    section = app._picture_brief_campus_section_from_pl_rows(rows, "月报", company_tree)
+
+    assert section[0] == ["校区", "收入", "净利润", "净利率", "校区", "收入", "净利润", "净利率"]
+    assert section[1] == ["莞小", "10", "3", "30%", "东泰", "待接入", "待接入", "-"]
+    assert section[2] == ["莞初", "20", "8", "40%", "虎翼营", "待接入", "待接入", "-"]
+    assert any(row[4] == "鸿福尔遇" and row[5:8] == ["5", "-1", "-20%"] for row in section)
+    assert all("@所有人" not in "".join(row) and "月份" not in row for row in section)
+
+
+def test_picture_brief_db_signature_tracks_wal_and_shm_files(tmp_path, monkeypatch):
+    db_path = tmp_path / "finance_dw.db"
+    db_path.write_bytes(b"main")
+    monkeypatch.setattr(app, "get_db_path", lambda: db_path)
+
+    base = app._picture_brief_db_signature()
+    wal_path = Path(f"{db_path}-wal")
+    wal_path.write_bytes(b"wal-data")
+    with_wal = app._picture_brief_db_signature()
+    shm_path = Path(f"{db_path}-shm")
+    shm_path.write_bytes(b"shm-data")
+    with_shm = app._picture_brief_db_signature()
+
+    assert with_wal != base
+    assert with_shm != with_wal
+    assert any(path.endswith("-wal") and exists == 1 and size == len(b"wal-data") for path, exists, _, size in with_wal[1])
+    assert any(path.endswith("-shm") and exists == 1 and size == len(b"shm-data") for path, exists, _, size in with_shm[1])
+
+
+def test_picture_brief_pl_detail_cache_invalidates_when_wal_changes(tmp_path, monkeypatch):
+    db_path = tmp_path / "finance_dw.db"
+    db_path.write_bytes(b"main")
+    monkeypatch.setattr(app, "get_db_path", lambda: db_path)
+    app._picture_brief_pl_detail_rows_cached.clear()
+    calls: list[int] = []
+
+    def fake_execute_sql(sql, params=None):
+        calls.append(1)
+        return pd.DataFrame(
+            [
+                {
+                    "id": len(calls),
+                    "company_code": "101",
+                    "item_code": f"OPERATING_{len(calls)}",
+                    "item_name": "收入合计",
+                    "amount": len(calls) * 100,
+                    "ytd_amount": len(calls) * 100,
+                }
+            ]
+        )
+
+    monkeypatch.setattr(app, "execute_sql", fake_execute_sql)
+
+    first = app._picture_brief_pl_detail_rows("202603")
+    second = app._picture_brief_pl_detail_rows("202603")
+    Path(f"{db_path}-wal").write_bytes(b"wal-write")
+    third = app._picture_brief_pl_detail_rows("202603")
+
+    assert len(calls) == 2
+    assert first.loc[0, "amount"] == 100
+    assert second.loc[0, "amount"] == 100
+    assert third.loc[0, "amount"] == 200
+
+
+def test_picture_brief_company_tree_cache_invalidates_when_wal_changes(tmp_path, monkeypatch):
+    db_path = tmp_path / "finance_dw.db"
+    db_path.write_bytes(b"main")
+    monkeypatch.setattr(app, "get_db_path", lambda: db_path)
+    app._picture_brief_company_tree_rows_cached.clear()
+    calls: list[int] = []
+
+    def fake_execute_sql(sql, params=None):
+        calls.append(1)
+        return pd.DataFrame([{"code": f"C{len(calls)}", "parent_code": "ROOT"}])
+
+    monkeypatch.setattr(app, "execute_sql", fake_execute_sql)
+
+    first = app._picture_brief_company_descendants("ROOT")
+    second = app._picture_brief_company_descendants("ROOT")
+    Path(f"{db_path}-wal").write_bytes(b"wal-write")
+    third = app._picture_brief_company_descendants("ROOT")
+
+    assert len(calls) == 2
+    assert first == ["C1"]
+    assert second == ["C1"]
+    assert third == ["C2"]
 
 
 def test_picture_brief_kpi_html_uses_larger_colored_values():

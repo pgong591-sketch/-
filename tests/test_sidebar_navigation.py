@@ -35,8 +35,10 @@ def test_business_center_uses_budget_entry_in_profit_dashboard_slot():
     business_entries = app.NAV_MODULE_SECTIONS["经营中心"]["经营看板"]
 
     assert business_entries[1] == "全面预算"
+    assert "资金预警" in business_entries
     assert "利润表总览驾驶舱" not in business_entries
     assert business_entries.count("全面预算") == 1
+    assert business_entries.count("资金预警") == 1
 
 
 def test_sidebar_expanded_state_keeps_multiple_modules_open():
@@ -119,6 +121,14 @@ def test_picture_brief_sidebar_click_updates_page_before_dispatch():
     assert "args=(item, page_module.get(item, module_name))" in render_source
     assert "page_slot = st.empty()" in page_map_source
     assert '"多维图片简报": "图片简报"' in inspect.getsource(app)
+
+
+def test_funds_warning_entry_dispatches_to_funds_warning_page():
+    page_map_source = inspect.getsource(app.main)
+
+    assert app.NAV_LABELS["资金预警"] == "资金预警"
+    assert '"资金预警": render_funds_warning' in page_map_source
+    assert app._sidebar_page_module_map()["资金预警"] == "经营中心"
 
 
 def test_no_single_module_pills_in_sidebar_source():

@@ -97,10 +97,16 @@ def _is_income_cost_name(text: str) -> bool:
     return "收入成本费用表" in text or "收入成本费用明细" in text
 
 
+def _is_explicit_balance_sheet_name(text: str) -> bool:
+    return "资产负债表" in text or "K合01表" in text or "k合01表" in text
+
+
 def _is_explicit_mgmt_income_cost_name(text: str) -> bool:
     explicit_tokens = [
         "管理中心部门收入成本费用表",
         "非学科管理中心部门收入成本费用表",
+        "非学科管理中心收入成本费用表",
+        "非学科管理中心管理公司收入成本费用表",
         "部门收入成本费用表",
         "管理公司收入成本费用表",
     ]
@@ -152,14 +158,14 @@ def identify_report_type(
     zh_name_hint = "".join(candidate_names)
 
     # 0. ASCII 文件名兜底（处理临时拷贝文件名）
+    if _is_explicit_balance_sheet_name(zh_name_hint):
+        return RT_BALANCE_SHEET
     if _is_explicit_mgmt_income_cost_name(zh_name_hint):
         if "非学科" in zh_name_hint:
             return RT_NON_SUBJECT_MGMT_DEPT_INCOME_COST
         return RT_MGMT_DEPT_INCOME_COST
     if _is_income_cost_name(zh_name_hint):
         return RT_INCOME_COST_EXPENSE
-    if "非学科管理中心" in zh_name_hint:
-        return RT_NON_SUBJECT_MGMT_DEPT_INCOME_COST
     if "非学科课酬" in zh_name_hint:
         return RT_NON_SUBJECT_TEACHING_FEE
     if "收入人次" in zh_name_hint:

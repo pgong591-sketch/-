@@ -1871,7 +1871,7 @@ def _alerts_html(anomalies: list[dict]) -> str:
 
 NAV_MODULE_SECTIONS = {
     "经营中心": {
-        "经营看板": ["首页", "全面预算", "利润表明细（原表）", "费用科目分析", "多维图片简报", "多期对比"],
+        "经营看板": ["首页", "全面预算", "利润表明细（原表）", "费用科目分析", "资金预警", "多维图片简报", "多期对比"],
         "经营测算": ["盈亏平衡测算"],
     },
     "数据中心": {
@@ -1921,6 +1921,7 @@ NAV_LABELS = {
     "利润表总览驾驶舱": "利润驾驶舱",
     "利润表明细（原表）": "经营汇总表",
     "费用科目分析": "费用分析",
+    "资金预警": "资金预警",
     "全面预算": "全面预算",
     "合并报表": "合并报表",
     "多期对比": "多期对比",
@@ -3832,6 +3833,54 @@ def _picture_brief_template_skin_html(sheet_html: str) -> str:
 
 PICTURE_BRIEF_SECTION_TITLES = ["素质中心报告", "其他模块报告", "对外投资情况", "各校区具体情况"]
 PICTURE_BRIEF_OPERATING_ITEMS = ["收入合计", "净利润", "人工", "房租水电", "成本费用合计"]
+PICTURE_BRIEF_OTHER_MODULE_SCOPES = [
+    {"label": "学校", "root_code": "10108", "include_root": False, "fallback_codes": ["1010801"]},
+    {"label": "幼儿园", "codes": ["1010702"]},
+    {"label": "尔遇书城", "codes": ["1010601"]},
+    {"label": "茶山托育", "codes": ["1010703"]},
+    {"label": "青少年宫", "root_code": "10118", "include_root": False, "fallback_codes": ["1011801"]},
+    {"label": "探幽文旅", "codes": ["10121"]},
+]
+PICTURE_BRIEF_INVESTMENT_SCOPES = [
+    {"label": "深圳卓越", "codes": ["1010201"]},
+    {"label": "中科心研", "codes": ["1020301"]},
+    {"label": "武汉均衡", "codes": []},
+    {"label": "多彩维度", "codes": []},
+    {"label": "凤来置业", "codes": ["10119"]},
+    {"label": "溢星空", "codes": []},
+]
+PICTURE_BRIEF_CAMPUS_SCOPES = [
+    {"label": "莞小", "codes": ["101010120"]},
+    {"label": "莞初", "codes": ["101010128"]},
+    {"label": "莞高", "codes": ["101010121"]},
+    {"label": "个性化", "codes": ["101010129"]},
+    {"label": "南城", "codes": ["101010102"]},
+    {"label": "石龙", "codes": ["101010103"]},
+    {"label": "万江", "codes": ["101010104"]},
+    {"label": "西平", "codes": ["101010106"]},
+    {"label": "厚街", "codes": ["101010110"]},
+    {"label": "石碣", "codes": ["101010111"]},
+    {"label": "虎门", "codes": ["101010112"]},
+    {"label": "石井", "codes": ["101010113"]},
+    {"label": "西平三和", "codes": ["101010132"]},
+    {"label": "高埗", "codes": ["101010135"]},
+    {"label": "长安", "codes": ["101010134"]},
+    {"label": "东泰", "codes": ["101010116"]},
+    {"label": "虎翼营", "codes": ["101010123"]},
+    {"label": "宏图", "codes": ["101010117"]},
+    {"label": "茶山学前", "codes": ["101010131"]},
+    {"label": "寮步石大", "codes": ["101010130"]},
+    {"label": "南城虎翼", "codes": ["101010133"]},
+    {"label": "拔创中心", "codes": ["101010136"]},
+    {"label": "鸿福尔遇", "codes": ["1020401"]},
+    {"label": "荣郡尔遇", "codes": ["1020402"]},
+    {"label": "天骄尔遇", "codes": ["1020403"]},
+    {"label": "金域尔遇", "codes": ["1020404"]},
+    {"label": "星城尔遇", "codes": ["1020405"]},
+    {"label": "龙景尔遇", "codes": ["1020406"]},
+    {"label": "翡丽山尔遇", "codes": ["1020407"]},
+    {"label": "西城楼尔遇", "codes": ["1020408"]},
+]
 
 
 def _picture_brief_columns(brief_type: str) -> tuple[int, int]:
@@ -3951,21 +4000,27 @@ def _picture_brief_kpis(grid: pd.DataFrame, brief_type: str = "月报") -> list[
     return [(label, by_label.get(label, "-")) for label in wanted]
 
 
-def _picture_brief_db_signature() -> tuple[str, int]:
+def _picture_brief_db_signature() -> tuple[str, tuple[tuple[str, int, int, int], ...]]:
     path = get_db_path()
-    try:
-        return str(path), path.stat().st_mtime_ns
-    except OSError:
-        return str(path), 0
+    signature: list[tuple[str, int, int, int]] = []
+    for candidate in (path, Path(f"{path}-wal"), Path(f"{path}-shm")):
+        try:
+            stat = candidate.stat()
+            signature.append((str(candidate), 1, stat.st_mtime_ns, stat.st_size))
+        except OSError:
+            signature.append((str(candidate), 0, 0, 0))
+    return str(path), tuple(signature)
 
 
 def _picture_brief_pl_detail_rows(period: str) -> pd.DataFrame:
-    db_path, db_mtime = _picture_brief_db_signature()
-    return _picture_brief_pl_detail_rows_cached(str(period), db_path, db_mtime).copy(deep=True)
+    db_path, db_signature = _picture_brief_db_signature()
+    return _picture_brief_pl_detail_rows_cached(str(period), db_path, db_signature).copy(deep=True)
 
 
 @st.cache_data(show_spinner=False)
-def _picture_brief_pl_detail_rows_cached(period: str, db_path: str, db_mtime: int) -> pd.DataFrame:
+def _picture_brief_pl_detail_rows_cached(
+    period: str, db_path: str, db_signature: tuple[tuple[str, int, int, int], ...]
+) -> pd.DataFrame:
     params = {"period": period}
     item_sql = _sql_in(PICTURE_BRIEF_OPERATING_ITEMS, "picture_item", params)
     try:
@@ -4038,14 +4093,104 @@ def _picture_brief_scope_values(rows: pd.DataFrame, company_codes: list[str] | N
     return {item: _safe_float(totals.get(item)) for item in PICTURE_BRIEF_OPERATING_ITEMS}
 
 
+def _picture_brief_scope_has_pl_data(rows: pd.DataFrame, company_codes: list[str]) -> bool:
+    if not company_codes or len(rows) == 0:
+        return False
+    df = _picture_brief_preferred_pl_rows(rows)
+    code_set = {str(code) for code in company_codes}
+    df = df[df["company_code"].astype(str).isin(code_set)]
+    return bool(df["item_name"].astype(str).isin({"收入合计", "净利润"}).any())
+
+
+def _picture_brief_resolve_scope_codes(scope: dict, company_tree: pd.DataFrame) -> list[str]:
+    if "codes" in scope:
+        return [str(code) for code in scope.get("codes", []) if str(code)]
+    root_code = str(scope.get("root_code") or "")
+    if not root_code:
+        return []
+    codes = _picture_brief_company_descendants_from_rows(
+        company_tree, root_code, bool(scope.get("include_root", False))
+    )
+    return codes or [str(code) for code in scope.get("fallback_codes", []) if str(code)]
+
+
+def _picture_brief_entity_metric_cells(rows: pd.DataFrame, company_codes: list[str], use_ytd: bool) -> list[str]:
+    if not company_codes:
+        return ["待确认", "待确认", "-"]
+    if not _picture_brief_scope_has_pl_data(rows, company_codes):
+        return ["待接入", "待接入", "-"]
+    values = _picture_brief_scope_values(rows, company_codes, use_ytd)
+    revenue = values.get("收入合计", 0.0)
+    profit = values.get("净利润", 0.0)
+    return [
+        _picture_brief_amount_text(revenue),
+        _picture_brief_amount_text(profit),
+        _picture_brief_ratio_text(profit, revenue),
+    ]
+
+
+def _picture_brief_mapped_section_from_pl_rows(
+    rows: pd.DataFrame,
+    brief_type: str,
+    scopes: list[dict],
+    company_tree: pd.DataFrame,
+    include_depreciation_row: bool = False,
+) -> list[list[str]]:
+    use_ytd = brief_type == "本年累计"
+    labels = [str(scope.get("label") or "") for scope in scopes]
+    metric_by_label = {
+        label: _picture_brief_entity_metric_cells(
+            rows, _picture_brief_resolve_scope_codes(scope, company_tree), use_ytd
+        )
+        for label, scope in zip(labels, scopes)
+    }
+    section = [
+        ["类别", *labels],
+        ["收入", *[metric_by_label[label][0] for label in labels]],
+        ["净利润", *[metric_by_label[label][1] for label in labels]],
+        ["净利率", *[metric_by_label[label][2] for label in labels]],
+    ]
+    if include_depreciation_row:
+        section.append(["折摊前净利润", *["-" for _ in labels]])
+    return section
+
+
+def _picture_brief_campus_section_from_pl_rows(
+    rows: pd.DataFrame, brief_type: str, company_tree: pd.DataFrame
+) -> list[list[str]]:
+    use_ytd = brief_type == "本年累计"
+    split_at = ceil(len(PICTURE_BRIEF_CAMPUS_SCOPES) / 2)
+    left_scopes = PICTURE_BRIEF_CAMPUS_SCOPES[:split_at]
+    right_scopes = PICTURE_BRIEF_CAMPUS_SCOPES[split_at:]
+    section = [["校区", "收入", "净利润", "净利率", "校区", "收入", "净利润", "净利率"]]
+    for idx, left_scope in enumerate(left_scopes):
+        left_label = str(left_scope.get("label") or "")
+        left_values = _picture_brief_entity_metric_cells(
+            rows, _picture_brief_resolve_scope_codes(left_scope, company_tree), use_ytd
+        )
+        if idx < len(right_scopes):
+            right_scope = right_scopes[idx]
+            right_label = str(right_scope.get("label") or "")
+            right_values = _picture_brief_entity_metric_cells(
+                rows, _picture_brief_resolve_scope_codes(right_scope, company_tree), use_ytd
+            )
+        else:
+            right_label = ""
+            right_values = ["", "", ""]
+        section.append([left_label, *left_values, right_label, *right_values])
+    return section
+
+
 def _picture_brief_company_descendants(root_code: str, include_root: bool = False) -> list[str]:
-    db_path, db_mtime = _picture_brief_db_signature()
-    companies = _picture_brief_company_tree_rows_cached(db_path, db_mtime)
+    db_path, db_signature = _picture_brief_db_signature()
+    companies = _picture_brief_company_tree_rows_cached(db_path, db_signature)
     return _picture_brief_company_descendants_from_rows(companies, root_code, include_root)
 
 
 @st.cache_data(show_spinner=False)
-def _picture_brief_company_tree_rows_cached(db_path: str, db_mtime: int) -> pd.DataFrame:
+def _picture_brief_company_tree_rows_cached(
+    db_path: str, db_signature: tuple[tuple[str, int, int, int], ...]
+) -> pd.DataFrame:
     try:
         return execute_sql("SELECT code, parent_code FROM companies")
     except Exception:
@@ -4146,8 +4291,8 @@ def _picture_brief_quality_section_from_pl_detail(period: str, brief_type: str) 
 
 def _picture_brief_operating_context(period: str) -> dict[str, list]:
     rows = _picture_brief_pl_detail_rows(period)
-    db_path, db_mtime = _picture_brief_db_signature()
-    company_tree = _picture_brief_company_tree_rows_cached(db_path, db_mtime)
+    db_path, db_signature = _picture_brief_db_signature()
+    company_tree = _picture_brief_company_tree_rows_cached(db_path, db_signature)
     month_quality_rows = _picture_brief_quality_section_from_pl_rows(rows, "月报", company_tree)
     ytd_quality_rows = _picture_brief_quality_section_from_pl_rows(rows, "本年累计", company_tree)
     return {
@@ -4155,6 +4300,20 @@ def _picture_brief_operating_context(period: str) -> dict[str, list]:
         "ytd_kpis": _picture_brief_kpis_from_pl_rows(rows, "本年累计"),
         "month_quality_rows": month_quality_rows,
         "ytd_quality_rows": ytd_quality_rows,
+        "month_other_rows": _picture_brief_mapped_section_from_pl_rows(
+            rows, "月报", PICTURE_BRIEF_OTHER_MODULE_SCOPES, company_tree, include_depreciation_row=True
+        ),
+        "ytd_other_rows": _picture_brief_mapped_section_from_pl_rows(
+            rows, "本年累计", PICTURE_BRIEF_OTHER_MODULE_SCOPES, company_tree, include_depreciation_row=True
+        ),
+        "month_investment_rows": _picture_brief_mapped_section_from_pl_rows(
+            rows, "月报", PICTURE_BRIEF_INVESTMENT_SCOPES, company_tree
+        ),
+        "ytd_investment_rows": _picture_brief_mapped_section_from_pl_rows(
+            rows, "本年累计", PICTURE_BRIEF_INVESTMENT_SCOPES, company_tree
+        ),
+        "month_campus_rows": _picture_brief_campus_section_from_pl_rows(rows, "月报", company_tree),
+        "ytd_campus_rows": _picture_brief_campus_section_from_pl_rows(rows, "本年累计", company_tree),
     }
 
 
@@ -4736,12 +4895,597 @@ def render_multi_picture_brief():
     month_quality_rows = operating_context["month_quality_rows"]
     ytd_quality_rows = operating_context["ytd_quality_rows"]
     current_quality_rows = ytd_quality_rows if brief_type == "本年累计" else month_quality_rows
+    section_rows = {
+        "素质中心报告": current_quality_rows,
+        "其他模块报告": operating_context["ytd_other_rows" if brief_type == "本年累计" else "month_other_rows"],
+        "对外投资情况": operating_context["ytd_investment_rows" if brief_type == "本年累计" else "month_investment_rows"],
+        "各校区具体情况": operating_context["ytd_campus_rows" if brief_type == "本年累计" else "month_campus_rows"],
+    }
 
     _render_html(_picture_brief_kpi_html(current_kpis))
     for section_title in PICTURE_BRIEF_SECTION_TITLES:
-        rows = current_quality_rows if section_title == "素质中心报告" else _picture_brief_section_table(grid, section_title)
-        _render_html(_picture_brief_table_html(section_title, rows))
+        _render_html(_picture_brief_table_html(section_title, section_rows.get(section_title, [])))
     _render_html(_picture_brief_generated_note_html(month_kpis, ytd_kpis, month_quality_rows, ytd_quality_rows))
+
+
+FUNDS_WARNING_VIEW_SCOPE_OPTIONS = ["全部单体公司", "只看校区", "只看管理中心", "只看书馆", "只看资金预警公司"]
+FUNDS_WARNING_STATUS_OPTIONS = ["预警公司", "资金紧张", "资金关注", "资金安全", "数据待接入", "全部状态"]
+FUNDS_WARNING_SORT_OPTIONS = ["按风险从高到低", "按资金周转系数从低到高", "按可使用周转资金从低到高", "按公司名称"]
+FUNDS_WARNING_MONEY_COLUMNS = ["货币资金", "其他应收款", "其他应付款", "实收资本未达账", "可使用周转资金", "近6月平均经营成本"]
+FUNDS_WARNING_GROUP_RATIO_EXCLUDED_CODES = {"1010201", "101020101"}
+FUNDS_WARNING_BALANCE_ROOTS = ["1001", "1002", "1012", "1221", "2241"]
+FUNDS_WARNING_BALANCE_ROOT_METRIC = {
+    "cash_total": "cash",
+    "1001": "cash",
+    "1002": "cash",
+    "1012": "cash",
+    "1221_company": "other_receivable",
+    "2241_company": "other_payable",
+}
+FUNDS_WARNING_BALANCE_NAME_ROOT = {
+    "货币资金": "cash_total",
+    "现金": "1001",
+    "银行存款": "1002",
+    "其他货币资金": "1012",
+}
+
+
+def _funds_warning_period_options() -> list[str]:
+    try:
+        rows = execute_sql(
+            """
+            SELECT period FROM account_balance
+            UNION
+            SELECT period FROM pl_detail
+            ORDER BY period
+            """
+        )
+    except Exception:
+        return get_dashboard_periods()
+    periods = [str(item) for item in rows.get("period", pd.Series(dtype=str)).dropna().tolist()]
+    return periods or get_dashboard_periods()
+
+
+def _funds_warning_company_frame() -> pd.DataFrame:
+    try:
+        return execute_sql(
+            """
+            SELECT c.code,
+                   c.name,
+                   c.short_name,
+                   c.tree_path,
+                   COALESCE(d.business_group, '') AS business_group
+            FROM companies c
+            LEFT JOIN dim_company d ON d.company_id = c.code
+            WHERE c.status = 1
+              AND c.code <> 'ROOT'
+            ORDER BY COALESCE(c.tree_path, c.code), c.code
+            """
+        )
+    except Exception:
+        return pd.DataFrame(columns=["code", "name", "short_name", "tree_path", "business_group"])
+
+
+def _funds_warning_balance_metrics(period: str) -> pd.DataFrame:
+    try:
+        rows = execute_sql(
+            """
+            SELECT company_code, account_code, account_name, ending_balance
+            FROM account_balance
+            WHERE period = :period
+            """,
+            {"period": str(period)},
+        )
+    except Exception:
+        return pd.DataFrame(columns=["company_code", "cash", "other_receivable", "other_payable", "has_balance_data"])
+    return _funds_warning_preferred_balance_metrics(rows)
+
+
+def _funds_warning_balance_root(account_code, account_name) -> str | None:
+    code = str(account_code or "").strip()
+    name = str(account_name or "").strip()
+    if "其他应收款" in name and "公司往来" in name:
+        return "1221_company"
+    if "其他应付款" in name and "公司往来" in name:
+        return "2241_company"
+    for root in FUNDS_WARNING_BALANCE_ROOTS:
+        if root in {"1221", "2241"}:
+            continue
+        if code == root or code.startswith(root):
+            return root
+    if name in FUNDS_WARNING_BALANCE_NAME_ROOT:
+        return FUNDS_WARNING_BALANCE_NAME_ROOT[name]
+    return None
+
+
+def _funds_warning_is_parent_balance_row(account_code, account_name, root: str) -> bool:
+    code = str(account_code or "").strip()
+    name = str(account_name or "").strip()
+    if root in {"1221_company", "2241_company"}:
+        return False
+    return root == "cash_total" or code == root or FUNDS_WARNING_BALANCE_NAME_ROOT.get(name) == root
+
+
+def _funds_warning_preferred_balance_metrics(rows: pd.DataFrame) -> pd.DataFrame:
+    columns = ["company_code", "cash", "other_receivable", "other_payable", "has_balance_data"]
+    if len(rows) == 0:
+        return pd.DataFrame(columns=columns)
+    df = rows.copy()
+    company_codes = sorted({str(code) for code in df.get("company_code", pd.Series(dtype=str)).dropna().tolist()})
+    df["_root"] = df.apply(lambda row: _funds_warning_balance_root(row.get("account_code"), row.get("account_name")), axis=1)
+    df = df[df["_root"].notna()].copy()
+    root_values: list[dict] = []
+    if len(df) > 0:
+        df["_amount"] = pd.to_numeric(df.get("ending_balance", 0), errors="coerce").fillna(0.0)
+        df["_is_parent"] = df.apply(
+            lambda row: _funds_warning_is_parent_balance_row(row.get("account_code"), row.get("account_name"), row["_root"]),
+            axis=1,
+        )
+        for (company_code, root), group in df.groupby(["company_code", "_root"], dropna=False):
+            parent_rows = group[group["_is_parent"]]
+            effective = parent_rows if len(parent_rows) else group
+            root_values.append(
+                {
+                    "company_code": str(company_code),
+                    "root": str(root),
+                    "metric": FUNDS_WARNING_BALANCE_ROOT_METRIC[str(root)],
+                    "amount": float(effective["_amount"].sum()),
+                }
+            )
+
+    root_df = pd.DataFrame(root_values, columns=["company_code", "root", "metric", "amount"])
+    result_rows: list[dict] = []
+    for company_code in company_codes:
+        group = root_df[root_df["company_code"] == company_code]
+        if (group["root"] == "cash_total").any():
+            cash = float(group.loc[group["root"] == "cash_total", "amount"].sum())
+        else:
+            cash = float(group.loc[group["metric"] == "cash", "amount"].sum())
+        result_rows.append(
+            {
+                "company_code": str(company_code),
+                "cash": cash,
+                "other_receivable": float(group.loc[group["metric"] == "other_receivable", "amount"].sum()),
+                "other_payable": float(group.loc[group["metric"] == "other_payable", "amount"].sum()),
+                "has_balance_data": True,
+            }
+        )
+    return pd.DataFrame(result_rows, columns=columns)
+
+
+def _funds_warning_recent_periods(period: str, limit: int = 6) -> list[str]:
+    try:
+        rows = execute_sql(
+            """
+            SELECT DISTINCT period
+            FROM pl_detail
+            WHERE period <= :period
+            ORDER BY period DESC
+            LIMIT :limit
+            """,
+            {"period": str(period), "limit": int(limit)},
+        )
+    except Exception:
+        return [str(period)]
+    periods = [str(item) for item in rows.get("period", pd.Series(dtype=str)).dropna().tolist()]
+    return sorted(periods) or [str(period)]
+
+
+def _funds_warning_preferred_cost_rows(rows: pd.DataFrame) -> pd.DataFrame:
+    if len(rows) == 0:
+        return rows.copy()
+    df = rows.copy()
+    item_code = df.get("item_code", pd.Series([""] * len(df))).fillna("").astype(str)
+    df["_priority"] = item_code.map(
+        lambda value: 0 if value.startswith("OPERATING_") else (1 if value.startswith("SUMMARY_") else 2)
+    )
+    df["_row_id"] = pd.to_numeric(df.get("id", pd.Series(range(len(df)))), errors="coerce").fillna(0)
+    df = df.sort_values(["period", "company_code", "_priority", "_row_id"], ascending=[True, True, False, True])
+    return df.groupby(["period", "company_code"], as_index=False, group_keys=False).tail(1)
+
+
+def _funds_warning_cost_metrics(period: str) -> pd.DataFrame:
+    periods = _funds_warning_recent_periods(period)
+    params = {f"period_{idx}": value for idx, value in enumerate(periods)}
+    period_sql = ", ".join(f":period_{idx}" for idx in range(len(periods)))
+    try:
+        rows = execute_sql(
+            f"""
+            SELECT id, company_code, period, item_code, amount
+            FROM pl_detail
+            WHERE item_name = '成本费用合计'
+              AND period IN ({period_sql})
+            """,
+            params,
+        )
+    except Exception:
+        return pd.DataFrame(columns=["company_code", "avg_operating_cost", "cost_period_count"])
+    df = _funds_warning_preferred_cost_rows(rows)
+    if len(df) == 0:
+        return pd.DataFrame(columns=["company_code", "avg_operating_cost", "cost_period_count"])
+    df["_amount"] = pd.to_numeric(df.get("amount", 0), errors="coerce")
+    grouped = df.groupby("company_code", as_index=False).agg(
+        avg_operating_cost=("_amount", "mean"),
+        cost_period_count=("period", "nunique"),
+    )
+    return grouped
+
+
+def _funds_warning_status(turnover_ratio) -> str:
+    if turnover_ratio is None or pd.isna(turnover_ratio):
+        return "成本数据待接入"
+    ratio = float(turnover_ratio)
+    if ratio < 2.0:
+        return "资金紧张"
+    if ratio < 3.0:
+        return "资金关注"
+    return "资金安全"
+
+
+def _funds_warning_row_status(row) -> str:
+    if not bool(row.get("has_balance_data", False)):
+        return "资金数据待接入"
+    if _safe_float(row.get("近6月平均经营成本", 0)) <= 0:
+        return "成本数据待接入"
+    return _funds_warning_status(row.get("资金周转系数"))
+
+
+def _funds_warning_build_rows(companies: pd.DataFrame, balances: pd.DataFrame, costs: pd.DataFrame) -> pd.DataFrame:
+    if len(companies) == 0:
+        return pd.DataFrame()
+    df = companies.copy()
+    df["company_code"] = df["code"].astype(str)
+    if "business_group" not in df.columns:
+        df["business_group"] = ""
+    df["business_group"] = df["business_group"].fillna("").astype(str)
+    df["公司/校区"] = df.apply(
+        lambda row: str(row.get("short_name") or row.get("name") or row.get("code") or ""),
+        axis=1,
+    )
+    balances = balances.rename(
+        columns={"cash": "货币资金", "other_receivable": "其他应收款", "other_payable": "其他应付款"}
+    )
+    balance_cols = ["company_code", "货币资金", "其他应收款", "其他应付款", "has_balance_data"]
+    for col in balance_cols:
+        if col not in balances.columns:
+            balances[col] = True if col == "has_balance_data" else 0.0
+    df = df.merge(balances[balance_cols], on="company_code", how="left")
+    df = df.merge(costs[["company_code", "avg_operating_cost", "cost_period_count"]], on="company_code", how="left")
+    df["has_balance_data"] = df["has_balance_data"].fillna(False).astype(bool)
+    has_cost_data = df["avg_operating_cost"].notna() | df["cost_period_count"].notna()
+    df = df[df["has_balance_data"] | has_cost_data].copy()
+    if len(df) == 0:
+        return pd.DataFrame(
+            columns=[
+                "company_code",
+                "business_group",
+                "公司/校区",
+                "has_balance_data",
+                "货币资金",
+                "其他应收款",
+                "其他应付款",
+                "实收资本未达账",
+                "可使用周转资金",
+                "近6月平均经营成本",
+                "资金周转系数",
+                "资金状态",
+                "cost_period_count",
+            ]
+        )
+    for col in ["货币资金", "其他应收款", "其他应付款", "avg_operating_cost"]:
+        if col not in df.columns:
+            df[col] = 0.0
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+    df["实收资本未达账"] = 0.0
+    df["可使用周转资金"] = df["货币资金"] + df["其他应收款"] - df["其他应付款"] + df["实收资本未达账"]
+    df["近6月平均经营成本"] = df["avg_operating_cost"]
+    df["资金周转系数"] = df.apply(
+        lambda row: row["可使用周转资金"] / row["近6月平均经营成本"]
+        if row["has_balance_data"] and row["近6月平均经营成本"] > 0
+        else None,
+        axis=1,
+    )
+    missing_balance_mask = ~df["has_balance_data"]
+    df.loc[missing_balance_mask, ["货币资金", "其他应收款", "其他应付款", "可使用周转资金"]] = pd.NA
+    df["资金状态"] = df.apply(_funds_warning_row_status, axis=1)
+    return df[
+        [
+            "company_code",
+            "business_group",
+            "公司/校区",
+            "has_balance_data",
+            "货币资金",
+            "其他应收款",
+            "其他应付款",
+            "实收资本未达账",
+            "可使用周转资金",
+            "近6月平均经营成本",
+            "资金周转系数",
+            "资金状态",
+            "cost_period_count",
+        ]
+    ]
+
+
+def _funds_warning_filter_scope_rows(rows: pd.DataFrame, view_scope: str) -> pd.DataFrame:
+    if len(rows) == 0 or view_scope == "全部单体公司":
+        return rows
+    label = rows.get("公司/校区", pd.Series([""] * len(rows), index=rows.index)).fillna("").astype(str)
+    group = rows.get("business_group", pd.Series([""] * len(rows), index=rows.index)).fillna("").astype(str)
+    if view_scope == "只看校区":
+        return rows[
+            label.str.contains("校区", na=False)
+            | group.str.contains("素质中心|学校|幼儿园|托育|青少年宫", regex=True, na=False)
+        ]
+    if view_scope == "只看管理中心":
+        return rows[label.str.contains("管理中心", na=False) | group.str.contains("职能公司", na=False)]
+    if view_scope == "只看书馆":
+        return rows[label.str.contains("书馆|尔遇", regex=True, na=False) | group.str.contains("书馆", na=False)]
+    if view_scope == "只看资金预警公司":
+        return rows[rows["资金周转系数"].notna() & (rows["资金周转系数"] < 3.0)]
+    return rows
+
+
+def _funds_warning_filter_rows(rows: pd.DataFrame, status_filter: str) -> pd.DataFrame:
+    if len(rows) == 0 or status_filter == "全部状态":
+        return rows
+    if status_filter == "预警公司":
+        return rows[rows["资金周转系数"].notna() & (rows["资金周转系数"] < 3.0)]
+    if status_filter == "数据待接入":
+        return rows[rows["资金状态"].astype(str).str.contains("待接入", na=False)]
+    return rows[rows["资金状态"] == status_filter]
+
+
+def _funds_warning_sort_rows(rows: pd.DataFrame, sort_option: str) -> pd.DataFrame:
+    if len(rows) == 0:
+        return rows
+    df = rows.copy()
+    if sort_option == "按可使用周转资金从低到高":
+        return df.sort_values(["可使用周转资金", "company_code"], na_position="last")
+    if sort_option == "按公司名称":
+        return df.sort_values(["公司/校区", "company_code"], na_position="last")
+    if sort_option == "按资金周转系数从低到高":
+        return df.sort_values(["资金周转系数", "company_code"], na_position="last")
+    risk_order = {"资金紧张": 0, "资金关注": 1, "资金数据待接入": 2, "成本数据待接入": 2, "资金安全": 3}
+    df["_risk_order"] = df["资金状态"].map(risk_order).fillna(4)
+    return df.sort_values(["_risk_order", "资金周转系数", "可使用周转资金", "company_code"], na_position="last").drop(columns=["_risk_order"])
+
+
+def _funds_warning_group_ratio_rows(rows: pd.DataFrame) -> pd.DataFrame:
+    if len(rows) == 0:
+        return rows
+    df = rows.copy()
+    codes = df.get("company_code", pd.Series([""] * len(df), index=df.index)).fillna("").astype(str)
+    business_group = df.get("business_group", pd.Series([""] * len(df), index=df.index)).fillna("").astype(str)
+    return df[
+        ~codes.isin(FUNDS_WARNING_GROUP_RATIO_EXCLUDED_CODES)
+        & ~business_group.str.contains("对外投资", na=False)
+        & df["has_balance_data"].fillna(False).astype(bool)
+        & (pd.to_numeric(df["近6月平均经营成本"], errors="coerce") > 0)
+    ]
+
+
+def _funds_warning_group_turnover_ratio(rows: pd.DataFrame):
+    scoped = _funds_warning_group_ratio_rows(rows)
+    if len(scoped) == 0:
+        return None
+    total_cost = pd.to_numeric(scoped["近6月平均经营成本"], errors="coerce").fillna(0.0).sum()
+    if total_cost <= 0:
+        return None
+    total_available = pd.to_numeric(scoped["可使用周转资金"], errors="coerce").fillna(0.0).sum()
+    return float(total_available / total_cost)
+
+
+def _funds_warning_kpis(rows: pd.DataFrame) -> dict[str, str]:
+    if len(rows) == 0:
+        return {
+            "资金紧张公司数": "0",
+            "资金关注公司数": "0",
+            "集团资金周转系数": "-",
+            "可使用周转资金合计": "0.0",
+        }
+    group_ratio = _funds_warning_group_turnover_ratio(rows)
+    return {
+        "资金紧张公司数": str(int((rows["资金状态"] == "资金紧张").sum())),
+        "资金关注公司数": str(int((rows["资金状态"] == "资金关注").sum())),
+        "集团资金周转系数": f"{group_ratio:.2f}" if group_ratio is not None else "-",
+        "可使用周转资金合计": f"{rows['可使用周转资金'].sum() / 10000:,.1f}",
+    }
+
+
+def _funds_warning_money_text(value) -> str:
+    try:
+        if value is None or pd.isna(value):
+            return "-"
+        return f"{float(value) / 10000:,.1f}"
+    except (TypeError, ValueError):
+        return "-"
+
+
+def _funds_warning_ratio_text(value) -> str:
+    if value is None or pd.isna(value):
+        return "待接入"
+    return f"{float(value):.2f}"
+
+
+def _funds_warning_status_tag(status: str) -> str:
+    class_name = {
+        "资金紧张": "funds-warning-status-tight",
+        "资金关注": "funds-warning-status-watch",
+        "资金安全": "funds-warning-status-safe",
+    }.get(status, "funds-warning-status-pending")
+    return f'<span class="funds-warning-status {class_name}">{_html(status)}</span>'
+
+
+def _funds_warning_cell(value, numeric: bool = False) -> str:
+    text = _html(value)
+    negative_class = ""
+    if numeric:
+        raw = str(value).replace(",", "")
+        negative_class = " funds-warning-negative" if raw.startswith("-") else ""
+    return f'<td class="{"funds-warning-num" if numeric else "funds-warning-text"}{negative_class}">{text}</td>'
+
+
+def _funds_warning_table_html(rows: pd.DataFrame) -> str:
+    headers = [
+        "公司/校区",
+        "货币资金",
+        "其他应收款",
+        "其他应付款",
+        "实收资本未达账",
+        "可使用周转资金",
+        "近6月平均经营成本",
+        "资金周转系数",
+        "资金状态",
+    ]
+    if len(rows) == 0:
+        body = '<tr><td class="funds-warning-empty" colspan="9">暂无符合条件的公司</td></tr>'
+    else:
+        body_rows: list[str] = []
+        for _, row in rows.iterrows():
+            body_rows.append(
+                "<tr>"
+                + _funds_warning_cell(row["公司/校区"])
+                + "".join(_funds_warning_cell(_funds_warning_money_text(row[col]), numeric=True) for col in FUNDS_WARNING_MONEY_COLUMNS)
+                + _funds_warning_cell(_funds_warning_ratio_text(row["资金周转系数"]), numeric=True)
+                + f'<td class="funds-warning-text">{_funds_warning_status_tag(str(row["资金状态"]))}</td>'
+                + "</tr>"
+            )
+        body = "".join(body_rows)
+    header_html = "".join(f"<th>{_html(header)}</th>" for header in headers)
+    return f"""
+    <div class="funds-warning-table-head">
+      <h3>公司资金周转预警清单</h3>
+      <span>单位：万元</span>
+    </div>
+    <div class="funds-warning-table-wrap">
+      <table class="funds-warning-table">
+        <colgroup>
+          <col class="funds-warning-company-col">
+          <col span="8" class="funds-warning-data-col">
+        </colgroup>
+        <thead><tr>{header_html}</tr></thead>
+        <tbody>{body}</tbody>
+      </table>
+    </div>
+    """
+
+
+def _funds_warning_styles() -> str:
+    return """
+    <style>
+      .funds-warning-kpis { display:grid; grid-template-columns:repeat(4,minmax(150px,1fr)); gap:14px; margin:12px 0 18px; }
+      .funds-warning-card { background:#fff; border:1px solid #dbe5f2; border-radius:10px; padding:16px 18px; box-shadow:0 8px 22px rgba(15,23,42,.04); }
+      .funds-warning-card-label { color:#475569; font-weight:700; font-size:14px; margin-bottom:8px; }
+      .funds-warning-card-value { color:#1d4ed8; font-size:28px; line-height:1.15; font-weight:850; font-variant-numeric:tabular-nums; }
+      [class*="st-key-funds_warning_query"] { padding-top: 1.72rem; }
+      [class*="st-key-funds_warning_query"] button { min-height: 42px !important; }
+      .funds-warning-filter-note { margin:-2px 0 12px; color:#64748b; font-size:13px; font-weight:650; }
+      .funds-warning-table-head { display:flex; align-items:center; justify-content:space-between; margin:18px 0 8px; }
+      .funds-warning-table-head h3 { margin:0; color:#10233f; font-size:20px; font-weight:850; }
+      .funds-warning-table-head span { color:#64748b; font-size:13px; font-weight:700; }
+      .funds-warning-table-wrap { width:100%; overflow-x:auto; border:1px solid #dbe5f2; border-radius:8px; background:#fff; }
+      .funds-warning-table { width:100%; min-width:1180px; border-collapse:collapse; table-layout:fixed; color:#10233f; font-size:15px; }
+      .funds-warning-company-col { width:220px; }
+      .funds-warning-data-col { width:120px; }
+      .funds-warning-table th { background:#eaf2ff; border:1px solid #d7e4f5; padding:11px 10px; text-align:center; font-weight:850; }
+      .funds-warning-table td { border:1px solid #dbe5f2; padding:10px 10px; vertical-align:middle; background:#fff; }
+      .funds-warning-table tbody tr:nth-child(even) td { background:#fbfdff; }
+      .funds-warning-text { text-align:center; overflow-wrap:anywhere; }
+      .funds-warning-num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+      .funds-warning-negative { color:#dc2626; font-weight:750; }
+      .funds-warning-status { display:inline-flex; align-items:center; justify-content:center; min-width:68px; padding:4px 9px; border-radius:999px; font-size:13px; font-weight:800; }
+      .funds-warning-status-tight { color:#b91c1c; background:#fee2e2; }
+      .funds-warning-status-watch { color:#b45309; background:#fef3c7; }
+      .funds-warning-status-safe { color:#047857; background:#dcfce7; }
+      .funds-warning-status-pending { color:#475569; background:#e2e8f0; }
+      .funds-warning-empty { text-align:center; color:#64748b; padding:20px; }
+      .funds-warning-note { margin-top:14px; color:#475569; font-size:13px; line-height:1.7; }
+      @media (max-width: 900px) { .funds-warning-kpis { grid-template-columns:repeat(2,minmax(150px,1fr)); } }
+    </style>
+    """
+
+
+def render_funds_warning():
+    st.markdown('<div class="page-header">资金预警</div>', unsafe_allow_html=True)
+    st.markdown(_funds_warning_styles(), unsafe_allow_html=True)
+    periods = _funds_warning_period_options()
+    latest_period = max(periods) if periods else "202603"
+    years = sorted({period[:4] for period in periods}, reverse=True) or [latest_period[:4]]
+    selected_year = st.session_state.get("funds_warning_year", latest_period[:4])
+    if selected_year not in years:
+        selected_year = latest_period[:4]
+    months = [period[4:6] for period in sorted(periods) if period.startswith(selected_year)] or [latest_period[4:6]]
+    default_month = latest_period[4:6] if latest_period.startswith(selected_year) and latest_period[4:6] in months else months[-1]
+
+    companies = _funds_warning_company_frame()
+    col_year, col_month, col_scope, col_status, col_sort, col_query = st.columns([0.75, 0.75, 1.25, 1.05, 1.45, 0.9])
+    with col_year:
+        selected_year = st.selectbox("年份", years, index=years.index(selected_year), key="funds_warning_year")
+    months = [period[4:6] for period in sorted(periods) if period.startswith(selected_year)] or [default_month]
+    selected_month = st.session_state.get("funds_warning_month", default_month)
+    if selected_month not in months:
+        selected_month = default_month
+    with col_month:
+        selected_month = st.selectbox(
+            "月份",
+            months,
+            index=months.index(selected_month),
+            format_func=lambda value: f"{int(value)}月" if str(value).isdigit() else str(value),
+            key="funds_warning_month",
+        )
+    with col_scope:
+        selected_scope = st.selectbox(
+            "查看范围",
+            FUNDS_WARNING_VIEW_SCOPE_OPTIONS,
+            index=0,
+            key="funds_warning_scope",
+        )
+    with col_status:
+        selected_status = st.selectbox(
+            "资金状态",
+            FUNDS_WARNING_STATUS_OPTIONS,
+            index=0,
+            key="funds_warning_status",
+        )
+    with col_sort:
+        selected_sort = st.selectbox(
+            "排序方式",
+            FUNDS_WARNING_SORT_OPTIONS,
+            index=0,
+            key="funds_warning_sort",
+        )
+    with col_query:
+        st.button("查询预警", type="primary", use_container_width=True, key="funds_warning_query")
+    st.markdown(
+        '<div class="funds-warning-filter-note">默认展示资金周转系数低于 3.0 的单体公司；资金类数据仅取科目余额表。</div>',
+        unsafe_allow_html=True,
+    )
+
+    selected_period = f"{selected_year}{str(selected_month).zfill(2)}"
+    balances = _funds_warning_balance_metrics(selected_period)
+    costs = _funds_warning_cost_metrics(selected_period)
+    rows = _funds_warning_build_rows(companies, balances, costs)
+    scoped_rows = _funds_warning_filter_scope_rows(rows, selected_scope)
+    filtered_rows = _funds_warning_sort_rows(_funds_warning_filter_rows(scoped_rows, selected_status), selected_sort)
+    kpis = _funds_warning_kpis(rows)
+    card_html = "".join(
+        f'<div class="funds-warning-card"><div class="funds-warning-card-label">{_html(label)}</div><div class="funds-warning-card-value">{_html(value)}</div></div>'
+        for label, value in kpis.items()
+    )
+    _render_html(f'<div class="funds-warning-kpis">{card_html}</div>')
+    _render_html(_funds_warning_table_html(filtered_rows))
+    st.markdown(
+        """
+        <div class="funds-warning-note">
+        口径说明：可使用周转资金 = 货币资金 + 其他应收款 - 其他应付款 + 实收资本未达账。
+        资金周转系数 = 可使用周转资金 / 近6月平均经营成本。
+        资金周转系数 &lt; 2.0 为资金紧张，2.0-3.0 为资金关注，&gt;= 3.0 为资金安全。
+        投资计划未接入前，实收资本未达账按 0 处理；成本期间不足 6 个月时按已有期间平均。
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_multi_income_statement():
@@ -10189,6 +10933,7 @@ def main():
         "利润表总览驾驶舱": render_profit_dashboard,
         "利润表明细（原表）": render_profit_original_table,
         "费用科目分析": render_expense_subject_analysis,
+        "资金预警": render_funds_warning,
         "全面预算": render_budget_dashboard,
         "盈亏平衡测算": render_break_even_calculator,
         "合并报表": render_consolidated,

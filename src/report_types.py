@@ -68,8 +68,8 @@ FILE_NAME_PATTERNS: List[Tuple[str, str]] = [
     (r"现金流量表", "现金流量表"),
     (r"收入人次", RT_REVENUE_VOLUME),
     (r"非学科费用分配", RT_NON_SUBJECT_ALLOCATION),
+    (r"非学科管理中心.*收入成本费用|非学科管理中心.*部门收入成本费用|非学科管理中心.*管理公司收入成本费用", RT_NON_SUBJECT_MGMT_DEPT_INCOME_COST),
     (r"管理中心.*收入|管理中心.*成本|管理中心.*费用", RT_MGMT_DEPT_INCOME_COST),
-    (r"非学科管理中心", RT_NON_SUBJECT_MGMT_DEPT_INCOME_COST),
     (r"收入成本费用表|收入成本费用明细", RT_INCOME_COST_EXPENSE),
     (r"非学科课酬|课酬", RT_NON_SUBJECT_TEACHING_FEE),
 ]
