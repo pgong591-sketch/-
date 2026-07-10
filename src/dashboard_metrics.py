@@ -13,6 +13,10 @@ from .db_connection import execute_sql
 
 INCOME_ITEM = "一、营业收入"
 NET_PROFIT_ITEM = "四、净利润（净亏损以“-”号填列）"
+PL_REVENUE_ITEM = "收入合计"
+PL_NET_PROFIT_ITEM = "净利润"
+PL_COST_TOTAL_ITEM = "成本费用合计"
+PL_DASHBOARD_ITEMS = [PL_REVENUE_ITEM, PL_NET_PROFIT_ITEM, PL_COST_TOTAL_ITEM]
 COST_ITEMS = [
     "减：营业成本",
     "税金及附加",
@@ -25,7 +29,7 @@ COST_ITEMS = [
 def get_dashboard_periods() -> List[str]:
     """Return available reporting periods for dashboard selectors."""
     frames = []
-    for table in ["income_statement", "balance_sheet", "account_balance"]:
+    for table in ["pl_detail", "income_statement", "balance_sheet", "account_balance"]:
         try:
             frames.append(execute_sql(f"SELECT DISTINCT period FROM {table} WHERE period IS NOT NULL"))
         except Exception:
@@ -72,19 +76,21 @@ def get_home_dashboard(
     cost_run_rate = income["cost_run_rate"]
     cash_turnover_months = _safe_div(available_funds, cost_run_rate)
 
+    comparisons = _build_kpi_comparisons(period, company_codes, income, balance, budget)
+
     return {
         "period": period,
         "scope_code": scope_code,
         "scope_company_count": len(company_codes),
         "kpis": [
-            _kpi("本月收入", revenue, "money", budget.get("income_completion")),
-            _kpi("本月净利润", net_profit, "money", net_margin),
-            _kpi("净利率", net_margin, "percent", None),
-            _kpi("收入年度完成率", budget.get("income_completion"), "percent", None),
-            _kpi("利润年度完成率", budget.get("profit_completion"), "percent", None),
-            _kpi("货币资金", balance["cash"], "money", cash_turnover_months),
-            _kpi("预收账款", balance["advance_receipts"], "money", None),
-            _kpi("资产负债平衡差", balance["balance_gap"], "money", None),
+            _kpi("本月收入", revenue, "money", budget.get("income_completion"), comparisons.get("revenue")),
+            _kpi("本月净利润", net_profit, "money", net_margin, comparisons.get("net_profit")),
+            _kpi("净利率", net_margin, "percent", None, comparisons.get("net_margin")),
+            _kpi("收入年度完成率", budget.get("income_completion"), "percent", None, comparisons.get("income_completion")),
+            _kpi("利润年度完成率", budget.get("profit_completion"), "percent", None, comparisons.get("profit_completion")),
+            _kpi("货币资金", balance["cash"], "money", cash_turnover_months, comparisons.get("cash")),
+            _kpi("预收账款", balance["advance_receipts"], "money", None, comparisons.get("advance_receipts")),
+            _kpi("资产负债平衡差", balance["balance_gap"], "money", None, comparisons.get("balance_gap")),
         ],
         "income": income,
         "balance": balance,
@@ -96,8 +102,20 @@ def get_home_dashboard(
     }
 
 
-def _kpi(label: str, value: Any, value_type: str, delta: Any) -> Dict[str, Any]:
-    return {"label": label, "value": value, "type": value_type, "delta": delta}
+def _kpi(
+    label: str,
+    value: Any,
+    value_type: str,
+    delta: Any,
+    comparisons: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    return {
+        "label": label,
+        "value": value,
+        "type": value_type,
+        "delta": delta,
+        "comparisons": comparisons or {},
+    }
 
 
 def _scope_company_codes(scope_code: Optional[str]) -> List[str]:
@@ -144,39 +162,71 @@ def _company_filter(alias: str, company_codes: List[str], params: Dict[str, Any]
     return f" AND {alias}.company_code IN ({', '.join(placeholders)})"
 
 
+def preferred_pl_detail_rows(rows: pd.DataFrame) -> pd.DataFrame:
+    """Pick one source row per company and canonical pl item.
+
+    Imported income/cost tables may contain the same logical total as both
+    OPERATING_ and SUMMARY_ rows. Dashboard metrics must follow the operating
+    summary precedence: OPERATING_ first, then SUMMARY_, then other fallback rows.
+    """
+    if rows is None or len(rows) == 0:
+        return pd.DataFrame() if rows is None else rows.copy()
+    df = rows.copy()
+    if "company_code" not in df.columns or "item_name" not in df.columns:
+        return df
+    df["company_code"] = df["company_code"].fillna("").astype(str)
+    df["item_name"] = df["item_name"].fillna("").astype(str)
+    item_code = df.get("item_code", pd.Series([""] * len(df))).fillna("").astype(str)
+    df["_priority"] = item_code.map(
+        lambda value: 0 if value.startswith("OPERATING_") else (1 if value.startswith("SUMMARY_") else 2)
+    )
+    df["_row_id"] = pd.to_numeric(df.get("id", pd.Series(range(len(df)))), errors="coerce").fillna(0)
+    df = df.sort_values(
+        ["company_code", "item_name", "_priority", "_row_id"],
+        ascending=[True, True, False, True],
+    )
+    selected = df.groupby(["company_code", "item_name"], as_index=False, group_keys=False).tail(1)
+    return selected.drop(columns=[column for column in ("_priority", "_row_id") if column in selected.columns])
+
+
 def _income_summary(period: str, company_codes: List[str]) -> Dict[str, float]:
     params: Dict[str, Any] = {"period": period}
-    company_sql = _company_filter("i", company_codes, params)
+    company_sql = _company_filter("d", company_codes, params)
     df = execute_sql(
         f"""
         SELECT
-            SUM(CASE WHEN item_name = :income_item THEN period1_value ELSE 0 END) AS revenue,
-            SUM(CASE WHEN item_name = :profit_item THEN period1_value ELSE 0 END) AS net_profit,
-            SUM(CASE WHEN item_name IN (:cost1, :cost2, :cost3, :cost4, :cost5)
-                     THEN period1_value ELSE 0 END) AS cost_run_rate
-        FROM income_statement i
-        WHERE period = :period {company_sql}
+            id,
+            company_code,
+            item_code,
+            item_name,
+            amount
+        FROM pl_detail d
+        WHERE period = :period
+          AND item_name IN (:income_item, :profit_item, :cost_item)
+          {company_sql}
         """,
         {
             **params,
-            "income_item": INCOME_ITEM,
-            "profit_item": NET_PROFIT_ITEM,
-            "cost1": COST_ITEMS[0],
-            "cost2": COST_ITEMS[1],
-            "cost3": COST_ITEMS[2],
-            "cost4": COST_ITEMS[3],
-            "cost5": COST_ITEMS[4],
+            "income_item": PL_REVENUE_ITEM,
+            "profit_item": PL_NET_PROFIT_ITEM,
+            "cost_item": PL_COST_TOTAL_ITEM,
         },
     )
-    row = df.iloc[0].to_dict() if len(df) else {}
-    revenue = _num(row.get("revenue"))
-    net_profit = _num(row.get("net_profit"))
-    cost_run_rate = abs(_num(row.get("cost_run_rate")))
+    preferred = preferred_pl_detail_rows(df)
+    if len(preferred):
+        preferred["_amount"] = pd.to_numeric(preferred.get("amount"), errors="coerce").fillna(0.0)
+        totals = preferred.groupby("item_name")["_amount"].sum().to_dict()
+    else:
+        totals = {}
+    revenue = _num(totals.get(PL_REVENUE_ITEM))
+    net_profit = _num(totals.get(PL_NET_PROFIT_ITEM))
+    cost_run_rate = abs(_num(totals.get(PL_COST_TOTAL_ITEM)))
     return {
         "revenue": revenue,
         "net_profit": net_profit,
         "net_margin": _safe_div(net_profit, revenue),
         "cost_run_rate": cost_run_rate,
+        "has_data": len(preferred) > 0,
     }
 
 
@@ -191,7 +241,8 @@ def _balance_summary(period: str, company_codes: List[str]) -> Dict[str, float]:
             SUM(CASE WHEN item_name = '其他应收款' THEN ending_balance ELSE 0 END) AS other_receivables,
             SUM(CASE WHEN item_name = '其他应付款' THEN ending_balance ELSE 0 END) AS other_payables,
             SUM(CASE WHEN item_name = '资产总计' THEN ending_balance ELSE 0 END) AS total_assets,
-            SUM(CASE WHEN item_name = '负债和所有者权益（或股东权益）总计' THEN ending_balance ELSE 0 END) AS total_liabilities_equity
+            SUM(CASE WHEN item_name = '负债和所有者权益（或股东权益）总计' THEN ending_balance ELSE 0 END) AS total_liabilities_equity,
+            COUNT(*) AS row_count
         FROM balance_sheet b
         WHERE period = :period {company_sql}
         """,
@@ -208,6 +259,7 @@ def _balance_summary(period: str, company_codes: List[str]) -> Dict[str, float]:
         "total_assets": total_assets,
         "total_liabilities_equity": total_liabilities_equity,
         "balance_gap": total_assets - total_liabilities_equity,
+        "has_data": _num(row.get("row_count")) > 0,
     }
 
 
@@ -377,6 +429,107 @@ def _budget_progress(
     return pd.DataFrame(rows)
 
 
+def _previous_month_period(period: str) -> Optional[str]:
+    period = str(period)
+    if len(period) != 6 or not period.isdigit():
+        return None
+    year = int(period[:4])
+    month = int(period[4:6])
+    if month <= 1:
+        return f"{year - 1}12"
+    return f"{year}{month - 1:02d}"
+
+
+def _same_month_last_year_period(period: str) -> Optional[str]:
+    period = str(period)
+    if len(period) != 6 or not period.isdigit():
+        return None
+    return f"{int(period[:4]) - 1}{period[4:6]}"
+
+
+def _relative_change(current: Any, previous: Any) -> Optional[float]:
+    previous_value = _num(previous)
+    if previous_value == 0:
+        return None
+    return (_num(current) - previous_value) / abs(previous_value)
+
+
+def _point_change(current: Any, previous: Any) -> Optional[float]:
+    if current is None or previous is None:
+        return None
+    return _num(current) - _num(previous)
+
+
+def _comparison(value: Optional[float], mode: str) -> Dict[str, Any]:
+    return {"value": value, "mode": mode}
+
+
+def _comparison_pair(
+    current: Dict[str, Any],
+    previous: Optional[Dict[str, Any]],
+    same_month_last_year: Optional[Dict[str, Any]],
+    key: str,
+    mode: str,
+) -> Dict[str, Dict[str, Any]]:
+    def calc(other: Optional[Dict[str, Any]]) -> Optional[float]:
+        if not other:
+            return None
+        if mode == "point":
+            return _point_change(current.get(key), other.get(key))
+        return _relative_change(current.get(key), other.get(key))
+
+    return {
+        "同比": _comparison(calc(same_month_last_year), mode),
+        "环比": _comparison(calc(previous), mode),
+    }
+
+
+def _build_kpi_comparisons(
+    period: str,
+    company_codes: List[str],
+    income: Dict[str, Any],
+    balance: Dict[str, Any],
+    budget: Dict[str, Any],
+) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    previous_period = _previous_month_period(period)
+    last_year_period = _same_month_last_year_period(period)
+    previous_income = _income_summary(previous_period, company_codes) if previous_period else None
+    last_year_income = _income_summary(last_year_period, company_codes) if last_year_period else None
+    previous_balance = _balance_summary(previous_period, company_codes) if previous_period else None
+    last_year_balance = _balance_summary(last_year_period, company_codes) if last_year_period else None
+
+    year = str(period)[:4]
+    month = int(str(period)[4:6]) if len(str(period)) >= 6 and str(period)[4:6].isdigit() else 1
+    previous_budget = (
+        _budget_summary(previous_period[:4], int(previous_period[4:6]), company_codes, company_codes)
+        if previous_period
+        else None
+    )
+    last_year_budget = (
+        _budget_summary(last_year_period[:4], int(last_year_period[4:6]), company_codes, company_codes)
+        if last_year_period
+        else None
+    )
+    current_budget = budget or _budget_summary(year, month, company_codes, company_codes)
+
+    return {
+        "revenue": _comparison_pair(income, previous_income, last_year_income, "revenue", "percent"),
+        "net_profit": _comparison_pair(income, previous_income, last_year_income, "net_profit", "percent"),
+        "net_margin": _comparison_pair(income, previous_income, last_year_income, "net_margin", "point"),
+        "income_completion": _comparison_pair(
+            current_budget, previous_budget, last_year_budget, "income_completion", "point"
+        ),
+        "profit_completion": _comparison_pair(
+            current_budget, previous_budget, last_year_budget, "profit_completion", "point"
+        ),
+        "cash": _comparison_pair(balance, previous_balance, last_year_balance, "cash", "percent"),
+        "advance_receipts": _comparison_pair(
+            balance, previous_balance, last_year_balance, "advance_receipts", "percent"
+        ),
+        "balance_gap": _comparison_pair(balance, previous_balance, last_year_balance, "balance_gap", "percent"),
+    }
+
+
 def _funds_by_company(period: str, company_codes: List[str]) -> pd.DataFrame:
     params: Dict[str, Any] = {"period": period}
     company_sql = _company_filter("b", company_codes, params)
@@ -408,26 +561,49 @@ def _funds_by_company(period: str, company_codes: List[str]) -> pd.DataFrame:
 def _company_ranking(period: str, company_codes: List[str]) -> pd.DataFrame:
     params: Dict[str, Any] = {
         "period": period,
-        "income_item": INCOME_ITEM,
-        "profit_item": NET_PROFIT_ITEM,
+        "income_item": PL_REVENUE_ITEM,
+        "profit_item": PL_NET_PROFIT_ITEM,
     }
-    company_sql = _company_filter("i", company_codes, params)
+    company_sql = _company_filter("d", company_codes, params)
     df = execute_sql(
         f"""
         SELECT
-            i.company_code AS 公司编码,
-            COALESCE(c.short_name, c.name, i.company_code) AS 公司,
-            SUM(CASE WHEN i.item_name = :income_item THEN i.period1_value ELSE 0 END) AS 收入,
-            SUM(CASE WHEN i.item_name = :profit_item THEN i.period1_value ELSE 0 END) AS 净利润
-        FROM income_statement i
-        LEFT JOIN companies c ON i.company_code = c.code
-        WHERE i.period = :period {company_sql}
-        GROUP BY i.company_code, COALESCE(c.short_name, c.name, i.company_code)
+            d.id,
+            d.company_code AS 公司编码,
+            d.company_code AS company_code,
+            d.item_code,
+            d.item_name,
+            d.amount,
+            COALESCE(c.short_name, c.name, d.company_code) AS 公司,
+            COALESCE(c.short_name, c.name, d.company_code) AS _company_label
+        FROM pl_detail d
+        LEFT JOIN companies c ON d.company_code = c.code
+        WHERE d.period = :period {company_sql}
+          AND d.item_name IN (:income_item, :profit_item)
         """,
         params,
     )
     if len(df) == 0:
-        return df
+        return pd.DataFrame(columns=["公司编码", "公司", "收入", "净利润", "净利率"])
+    preferred = preferred_pl_detail_rows(df)
+    if len(preferred) == 0:
+        return pd.DataFrame(columns=["公司编码", "公司", "收入", "净利润", "净利率"])
+    preferred["_amount"] = pd.to_numeric(preferred.get("amount"), errors="coerce").fillna(0.0)
+    pivot = (
+        preferred.pivot_table(
+            index=["公司编码", "公司"],
+            columns="item_name",
+            values="_amount",
+            aggfunc="sum",
+            fill_value=0.0,
+        )
+        .reset_index()
+        .rename_axis(None, axis=1)
+    )
+    for column in (PL_REVENUE_ITEM, PL_NET_PROFIT_ITEM):
+        if column not in pivot.columns:
+            pivot[column] = 0.0
+    df = pivot.rename(columns={PL_REVENUE_ITEM: "收入", PL_NET_PROFIT_ITEM: "净利润"})
     df["净利率"] = df.apply(lambda row: _safe_div(row["净利润"], row["收入"]), axis=1)
     return df.sort_values("收入", ascending=False)
 

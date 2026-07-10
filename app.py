@@ -50,7 +50,16 @@ from src.company_structure import (
     EXTERNAL_CATEGORY, FALLBACK_MANAGED_MODULE, MANAGED_CATEGORY,
     MANAGED_MODULES, get_company_structure_view,
 )
-from src.dashboard_metrics import COST_ITEMS, INCOME_ITEM, NET_PROFIT_ITEM, get_dashboard_periods, get_home_dashboard
+from src.dashboard_metrics import (
+    COST_ITEMS,
+    INCOME_ITEM,
+    NET_PROFIT_ITEM,
+    PL_NET_PROFIT_ITEM,
+    PL_REVENUE_ITEM,
+    get_dashboard_periods,
+    get_home_dashboard,
+    preferred_pl_detail_rows,
+)
 from src.multidim_reports import get_multidim_income_statement, get_operating_summary
 from src.template_workbook import TemplateWorkbookError, load_template_sheet, load_template_sheet_frame, read_template_bytes
 from src.monthly_collection import (
@@ -931,6 +940,12 @@ PAGE_CSS = """
     .bi-kpi-card.cash { border-left-color: #d8912f; }
     .bi-kpi-card.risk { border-left-color: #d65045; }
     .bi-kpi-card.neutral { border-left-color: #6b7280; }
+    .bi-kpi-card.selected {
+        border-color: rgba(43, 125, 233, 0.42);
+        border-left-color: var(--accent);
+        box-shadow: 0 10px 24px rgba(43, 125, 233, 0.12);
+        background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+    }
 
     .bi-kpi-label {
         color: var(--muted);
@@ -951,13 +966,19 @@ PAGE_CSS = """
     .bi-kpi-value-link {
         color: inherit;
         text-decoration: none;
-        border-bottom: 1px dashed #cad5df;
-        transition: color .15s ease, border-color .15s ease;
+        border-bottom: 0;
+        cursor: pointer;
+        transition: color .15s ease, transform .15s ease;
+        display: inline-block;
     }
 
     .bi-kpi-value-link:hover {
         color: var(--accent);
-        border-bottom-color: var(--accent);
+        transform: translateY(-1px);
+    }
+
+    .bi-kpi-card.selected .bi-kpi-value-link {
+        color: var(--accent);
     }
 
     .bi-kpi-delta {
@@ -965,6 +986,236 @@ PAGE_CSS = """
         font-size: 0.76rem;
         margin-top: 0.32rem;
         width: 100%;
+    }
+
+    .bi-kpi-trends {
+        display: flex;
+        justify-content: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        color: #64748b;
+        font-size: 0.72rem;
+        margin-top: 0.28rem;
+        width: 100%;
+    }
+
+    .bi-kpi-trend.good { color: #15803d; font-weight: 700; }
+    .bi-kpi-trend.risk { color: #dc2626; font-weight: 700; }
+    .bi-kpi-trend.neutral { color: #64748b; }
+
+    .home-drill-panel-title {
+        color: var(--text);
+        font-size: 1.02rem;
+        font-weight: 760;
+        margin: 0.05rem 0 0.18rem;
+    }
+
+    .home-drill-panel-note {
+        color: var(--muted);
+        font-size: 0.78rem;
+        line-height: 1.5;
+        margin-bottom: 0.35rem;
+    }
+
+    .home-detail-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 1000000;
+        background: rgba(15, 23, 42, 0.28);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.35rem;
+    }
+
+    .home-detail-layer {
+        background: rgba(255, 255, 255, 0.96);
+        border: 1px solid rgba(203, 213, 225, 0.85);
+        border-radius: 24px;
+        box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22);
+        overflow: hidden;
+        color: var(--text);
+        display: flex;
+        flex-direction: column;
+    }
+
+    .home-detail-modal {
+        width: min(92vw, 1440px);
+        height: min(88vh, 900px);
+        max-height: calc(100vh - 0.7rem);
+        margin: auto;
+    }
+
+    .home-detail-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 1.05rem 1.18rem 0.78rem;
+        border-bottom: 1px solid #e2e8f0;
+        background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+    }
+
+    .home-detail-title {
+        font-size: 1.08rem;
+        line-height: 1.25;
+        font-weight: 780;
+        color: #18314f;
+    }
+
+    .home-detail-subtitle {
+        margin-top: 0.28rem;
+        font-size: 0.82rem;
+        line-height: 1.45;
+        color: #64748b;
+    }
+
+    .home-detail-close {
+        flex: 0 0 auto;
+        width: 2rem;
+        height: 2rem;
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        text-decoration: none;
+        color: #475569;
+        background: #eef3f8;
+        font-size: 1.35rem;
+        line-height: 1;
+        font-weight: 500;
+    }
+
+    .home-detail-close:hover {
+        color: #0f172a;
+        background: #dbe8f5;
+    }
+
+    .home-detail-body {
+        padding: 1rem 1.18rem 1.2rem;
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: auto;
+    }
+
+    .home-detail-modal .home-detail-body {
+        max-height: none;
+    }
+
+    .home-detail-table-wrap {
+        width: 100%;
+        overflow-x: auto;
+        border: 1px solid #dbe5f1;
+        border-radius: 12px;
+        background: #ffffff;
+    }
+
+    .home-detail-table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+        font-size: 0.86rem;
+        min-width: 100%;
+    }
+
+    .home-detail-table th,
+    .home-detail-table td {
+        border: 1px solid #dbe5f1;
+        padding: 0.58rem 0.66rem;
+        text-align: center;
+        vertical-align: middle;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .home-detail-table th.col-company,
+    .home-detail-table td.col-company {
+        white-space: nowrap;
+    }
+
+    .home-detail-table th.col-text,
+    .home-detail-table td.col-text {
+        white-space: nowrap;
+    }
+
+    .home-detail-table th {
+        background: #eaf3ff;
+        color: #18314f;
+        font-weight: 760;
+    }
+
+    .home-detail-sort-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.28rem;
+        color: inherit;
+        text-decoration: none;
+        width: 100%;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .home-detail-sort-label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .home-detail-sort {
+        color: #64748b;
+        font-size: 0.72rem;
+        line-height: 1;
+    }
+
+    .home-detail-sort.active {
+        color: #2563eb;
+    }
+
+    .home-detail-table td.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .home-detail-table td.neg {
+        color: #dc2626;
+        font-weight: 760;
+        background: #fff5f5;
+    }
+
+    .home-detail-table td.pos {
+        color: #15803d;
+        font-weight: 760;
+    }
+
+    .home-detail-tag-risk,
+    .home-detail-tag-warn,
+    .home-detail-tag-good {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 3rem;
+        padding: 0.14rem 0.48rem;
+        border-radius: 999px;
+        font-weight: 760;
+    }
+
+    .home-detail-tag-risk { color: #b42318; background: #fee4e2; }
+    .home-detail-tag-warn { color: #b54708; background: #fff4d6; }
+    .home-detail-tag-good { color: #027a48; background: #dcfae6; }
+
+    .home-detail-empty {
+        padding: 1rem;
+        border: 1px dashed #cbd5e1;
+        border-radius: 12px;
+        color: #64748b;
+        background: #f8fafc;
+        text-align: center;
     }
 
     .operating-kpi-grid {
@@ -1613,6 +1864,50 @@ def _fmt_kpi_delta(kpi: dict) -> str:
     return _fmt_percent(delta)
 
 
+def _fmt_kpi_comparison_value(item: dict | None) -> str:
+    if not item:
+        return "暂无"
+    value = item.get("value")
+    if value is None:
+        return "暂无"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "暂无"
+    sign = "+" if number > 0 else ""
+    if item.get("mode") == "point":
+        return f"{sign}{number * 100:.1f}pct"
+    return f"{sign}{number * 100:.1f}%"
+
+
+def _kpi_comparison_class(item: dict | None) -> str:
+    if not item or item.get("value") is None:
+        return "neutral"
+    try:
+        number = float(item.get("value"))
+    except (TypeError, ValueError):
+        return "neutral"
+    if number > 0:
+        return "good"
+    if number < 0:
+        return "risk"
+    return "neutral"
+
+
+def _kpi_comparisons_html(kpi: dict) -> str:
+    comparisons = kpi.get("comparisons") or {}
+    if not comparisons:
+        return ""
+    items = []
+    for label in ("同比", "环比"):
+        item = comparisons.get(label)
+        items.append(
+            f'<span class="bi-kpi-trend {_kpi_comparison_class(item)}">'
+            f'{_html(label)} {_html(_fmt_kpi_comparison_value(item))}</span>'
+        )
+    return f'<div class="bi-kpi-trends">{"".join(items)}</div>'
+
+
 def _progress_value(value) -> float:
     try:
         if value is None or pd.isna(value):
@@ -1703,28 +1998,42 @@ def _kpi_card_class(kpi: dict) -> str:
     return ""
 
 
-def _render_bi_kpi_grid(kpis: list[dict], drill_label_map: dict[str, str] | None = None) -> None:
+def _render_bi_kpi_grid(
+    kpis: list[dict],
+    drill_label_map: dict[str, str] | None = None,
+    selected_metric_key: str | None = None,
+) -> None:
     drill_label_map = drill_label_map or {}
     cards = []
     for kpi in kpis:
         label = str(kpi.get("label", ""))
         delta = _fmt_kpi_delta(kpi)
         delta_html = f'<div class="bi-kpi-delta">{_html(delta)}</div>' if delta else ""
+        trends_html = _kpi_comparisons_html(kpi)
         value_text = _fmt_kpi_value(kpi)
         drill_key = drill_label_map.get(label)
+        card_kind = _kpi_card_class(kpi)
+        if drill_key and drill_key == selected_metric_key:
+            card_classes = "bi-kpi-card selected" + (f" {card_kind}" if card_kind else "")
+        else:
+            card_classes = "bi-kpi-card" + (f" {card_kind}" if card_kind else "")
         if drill_key:
+            is_selected = drill_key == selected_metric_key
+            href = "?" if is_selected else f"?drill_metric={_html(drill_key)}"
+            title = "点击收起" if is_selected else "点击展开下钻"
             value_markup = (
-                f'<a class="bi-kpi-value-link" href="?drill_metric={_html(drill_key)}" '
-                f'title="点击下钻">{_html(value_text)}</a>'
+                f'<a class="bi-kpi-value-link" href="{href}" target="_top" '
+                f'title="{_html(title)}">{_html(value_text)}</a>'
             )
         else:
             value_markup = _html(value_text)
         cards.append(
             f"""
-            <div class="bi-kpi-card {_kpi_card_class(kpi)}">
+            <div class="{_html(card_classes)}">
                 <div class="bi-kpi-label">{_html(label)}</div>
                 <div class="bi-kpi-value">{value_markup}</div>
                 {delta_html}
+                {trends_html}
             </div>
             """
         )
@@ -2065,8 +2374,8 @@ HOME_DRILL_CONFIG: dict[str, dict[str, str]] = {
     "revenue": {
         "label": "本月收入",
         "title": "收入构成明细 (第二级)",
-        "source": "income",
-        "item_name": INCOME_ITEM,
+        "source": "pl_revenue",
+        "item_name": "收入合计",
         "current_col": "本月收入",
         "previous_col": "上月收入",
         "root": "集团总收入",
@@ -2074,11 +2383,38 @@ HOME_DRILL_CONFIG: dict[str, dict[str, str]] = {
     "net_profit": {
         "label": "本月净利润",
         "title": "净利润构成明细 (第二级)",
-        "source": "income",
-        "item_name": NET_PROFIT_ITEM,
+        "source": "pl_profit",
+        "item_name": "净利润",
         "current_col": "本月净利润",
         "previous_col": "上月净利润",
         "root": "集团总利润",
+    },
+    "net_margin": {
+        "label": "净利率",
+        "title": "净利率明细 (第二级)",
+        "source": "pl_margin",
+        "item_name": "净利率",
+        "current_col": "本月净利率",
+        "previous_col": "上月净利率",
+        "root": "集团净利率",
+    },
+    "income_completion": {
+        "label": "收入年度完成率",
+        "title": "收入预算完成明细 (第二级)",
+        "source": "budget_income",
+        "item_name": "收入年度完成率",
+        "current_col": "收入完成率",
+        "previous_col": "时间进度",
+        "root": "集团收入预算完成",
+    },
+    "profit_completion": {
+        "label": "利润年度完成率",
+        "title": "利润预算完成明细 (第二级)",
+        "source": "budget_profit",
+        "item_name": "利润年度完成率",
+        "current_col": "利润完成率",
+        "previous_col": "时间进度",
+        "root": "集团利润预算完成",
     },
     "cash": {
         "label": "货币资金",
@@ -2097,6 +2433,15 @@ HOME_DRILL_CONFIG: dict[str, dict[str, str]] = {
         "current_col": "本月预收账款",
         "previous_col": "上月预收账款",
         "root": "集团预收账款",
+    },
+    "balance_gap": {
+        "label": "资产负债平衡差",
+        "title": "资产负债平衡差明细 (第二级)",
+        "source": "balance_gap",
+        "item_name": "资产负债平衡差",
+        "current_col": "差额",
+        "previous_col": "上月差额",
+        "root": "集团资产负债平衡差",
     },
 }
 
@@ -2722,40 +3067,89 @@ def _filter_month_format_func(key_prefix: str):
     return None
 
 
-def _query_metric_by_group(
+def _query_pl_metric_by_company(
     period: str,
     company_codes: list[str],
-    source: str,
-    item_name: str,
 ) -> pd.DataFrame:
-    if source == "income":
-        table = "income_statement"
-        alias = "f"
-        value_col = "period1_value"
-    elif source == "balance":
-        table = "balance_sheet"
-        alias = "f"
-        value_col = "ending_balance"
-    else:
-        return pd.DataFrame(columns=["业务板块", "数值"])
+    params = {"period": period}
+    company_sql = _company_filter_clause("d", company_codes, params, "drill_pl")
+    rows = execute_sql(
+        f"""
+        SELECT
+            d.id,
+            d.company_code AS 公司编码,
+            d.company_code AS company_code,
+            d.item_code,
+            d.item_name,
+            d.amount,
+            COALESCE(c.short_name, c.name, d.company_code) AS 公司,
+            COALESCE(NULLIF(TRIM(dim.business_group), ''), '未分组') AS 业务板块
+        FROM pl_detail d
+        LEFT JOIN companies c ON d.company_code = c.code
+        LEFT JOIN dim_company dim ON CAST(dim.company_id AS TEXT) = CAST(d.company_code AS TEXT)
+        WHERE d.period = :period
+          AND d.item_name IN (:revenue_item, :profit_item)
+          {company_sql}
+        """,
+        {**params, "revenue_item": PL_REVENUE_ITEM, "profit_item": PL_NET_PROFIT_ITEM},
+    )
+    if rows.empty:
+        return pd.DataFrame(columns=["公司编码", "公司", "业务板块", "收入", "净利润"])
+    preferred = preferred_pl_detail_rows(rows)
+    if preferred.empty:
+        return pd.DataFrame(columns=["公司编码", "公司", "业务板块", "收入", "净利润"])
+    preferred["_amount"] = pd.to_numeric(preferred.get("amount"), errors="coerce").fillna(0.0)
+    pivot = (
+        preferred.pivot_table(
+            index=["公司编码", "公司", "业务板块"],
+            columns="item_name",
+            values="_amount",
+            aggfunc="sum",
+            fill_value=0.0,
+        )
+        .reset_index()
+        .rename_axis(None, axis=1)
+    )
+    for column in (PL_REVENUE_ITEM, PL_NET_PROFIT_ITEM):
+        if column not in pivot.columns:
+            pivot[column] = 0.0
+    return pivot.rename(columns={PL_REVENUE_ITEM: "收入", PL_NET_PROFIT_ITEM: "净利润"})
 
-    params = {"period": period, "item_name": item_name}
-    company_sql = _company_filter_clause(alias, company_codes, params, f"drill_{source}")
+
+def _query_balance_metric_by_company(
+    period: str,
+    company_codes: list[str],
+) -> pd.DataFrame:
+    params = {"period": period}
+    company_sql = _company_filter_clause("b", company_codes, params, "drill_balance")
     return execute_sql(
         f"""
         SELECT
+            b.company_code AS 公司编码,
+            COALESCE(c.short_name, c.name, b.company_code) AS 公司,
             COALESCE(NULLIF(TRIM(d.business_group), ''), '未分组') AS 业务板块,
-            SUM({alias}.{value_col}) AS 数值
-        FROM {table} {alias}
-        LEFT JOIN dim_company d
-          ON CAST(d.company_id AS TEXT) = CAST({alias}.company_code AS TEXT)
-        WHERE {alias}.period = :period
-          AND {alias}.item_name = :item_name
+            SUM(CASE WHEN b.item_name = '货币资金' THEN b.ending_balance ELSE 0 END) AS 货币资金,
+            SUM(CASE WHEN b.item_name = '预收账款' THEN b.ending_balance ELSE 0 END) AS 预收账款,
+            SUM(CASE WHEN b.item_name = '资产总计' THEN b.ending_balance ELSE 0 END) AS 资产总计,
+            SUM(CASE WHEN b.item_name = '负债和所有者权益（或股东权益）总计' THEN b.ending_balance ELSE 0 END) AS 负债权益总计
+        FROM balance_sheet b
+        LEFT JOIN companies c ON b.company_code = c.code
+        LEFT JOIN dim_company d ON CAST(d.company_id AS TEXT) = CAST(b.company_code AS TEXT)
+        WHERE b.period = :period
+          AND b.item_name IN ('货币资金', '预收账款', '资产总计', '负债和所有者权益（或股东权益）总计')
           {company_sql}
-        GROUP BY COALESCE(NULLIF(TRIM(d.business_group), ''), '未分组')
+        GROUP BY b.company_code, COALESCE(c.short_name, c.name, b.company_code),
+                 COALESCE(NULLIF(TRIM(d.business_group), ''), '未分组')
         """,
         params,
     )
+
+
+def _relative_change_value(current, previous):
+    previous_value = _safe_float(previous)
+    if abs(previous_value) < 1e-9:
+        return None
+    return (_safe_float(current) - previous_value) / abs(previous_value)
 
 
 def _load_metric_drilldown(
@@ -2767,42 +3161,433 @@ def _load_metric_drilldown(
     cfg = HOME_DRILL_CONFIG.get(metric_key)
     if not cfg:
         return pd.DataFrame()
+    source = cfg.get("source")
+    if source in {"pl_revenue", "pl_profit", "pl_margin"}:
+        current = _query_pl_metric_by_company(period, company_codes)
+        previous = _query_pl_metric_by_company(prev_period, company_codes) if prev_period else pd.DataFrame()
+        last_year_period = _period_same_month_last_year(period)
+        last_year = _query_pl_metric_by_company(last_year_period, company_codes) if last_year_period else pd.DataFrame()
+        merged = current.merge(
+            previous[["公司编码", "收入", "净利润"]].rename(
+                columns={"收入": "上月收入", "净利润": "上月净利润"}
+            ) if len(previous) else pd.DataFrame(columns=["公司编码", "上月收入", "上月净利润"]),
+            on="公司编码",
+            how="left",
+        ).merge(
+            last_year[["公司编码", "收入", "净利润"]].rename(
+                columns={"收入": "去年收入", "净利润": "去年净利润"}
+            ) if len(last_year) else pd.DataFrame(columns=["公司编码", "去年收入", "去年净利润"]),
+            on="公司编码",
+            how="left",
+        )
+        merged["净利率"] = merged.apply(lambda row: _safe_ratio_ui(row["净利润"], row["收入"]), axis=1)
+        merged["上月净利率"] = merged.apply(lambda row: _safe_ratio_ui(row.get("上月净利润"), row.get("上月收入")), axis=1)
+        if source == "pl_revenue":
+            total = _safe_float(merged["收入"].sum())
+            merged["收入占比"] = merged["收入"].apply(lambda value: _safe_ratio_ui(value, total))
+            merged["环比"] = merged.apply(lambda row: _relative_change_value(row["收入"], row.get("上月收入")), axis=1)
+            merged["同比"] = merged.apply(lambda row: _relative_change_value(row["收入"], row.get("去年收入")), axis=1)
+            return merged[["公司", "业务板块", "收入", "收入占比", "环比", "同比"]].sort_values("收入", ascending=False)
+        if source == "pl_profit":
+            total_abs = max(_safe_float(merged["净利润"].abs().sum()), 1.0)
+            merged["利润贡献"] = merged["净利润"].abs() / total_abs
+            merged["环比"] = merged.apply(lambda row: _relative_change_value(row["净利润"], row.get("上月净利润")), axis=1)
+            merged["同比"] = merged.apply(lambda row: _relative_change_value(row["净利润"], row.get("去年净利润")), axis=1)
+            merged["是否亏损"] = merged["净利润"].apply(lambda value: "亏损" if _safe_float(value) < 0 else "盈利")
+            return merged[["公司", "业务板块", "净利润", "利润贡献", "环比", "同比", "是否亏损"]].sort_values("净利润")
+        merged["净利率变化"] = merged["净利率"] - merged["上月净利率"]
+        return merged[["公司", "收入", "净利润", "净利率", "上月净利率", "净利率变化"]].sort_values("净利率")
 
-    current_df = _query_metric_by_group(
-        period,
-        company_codes,
-        cfg["source"],
-        cfg["item_name"],
-    ).rename(columns={"数值": "本期值"})
-    if len(current_df) == 0:
-        return current_df
+    if source in {"balance", "balance_gap"}:
+        current = _query_balance_metric_by_company(period, company_codes)
+        previous = _query_balance_metric_by_company(prev_period, company_codes) if prev_period else pd.DataFrame()
+        last_year_period = _period_same_month_last_year(period)
+        last_year = _query_balance_metric_by_company(last_year_period, company_codes) if last_year_period else pd.DataFrame()
+        if len(current) == 0:
+            return current
+        current["差额"] = current["资产总计"] - current["负债权益总计"]
+        if source == "balance":
+            item_name = cfg["item_name"]
+            previous_value_col = f"上月{item_name}"
+            last_year_value_col = f"去年{item_name}"
+            previous_view = (
+                previous[["公司编码", item_name]].rename(columns={item_name: previous_value_col})
+                if len(previous)
+                else pd.DataFrame(columns=["公司编码", previous_value_col])
+            )
+            last_year_view = (
+                last_year[["公司编码", item_name]].rename(columns={item_name: last_year_value_col})
+                if len(last_year)
+                else pd.DataFrame(columns=["公司编码", last_year_value_col])
+            )
+            merged = current.merge(previous_view, on="公司编码", how="left").merge(last_year_view, on="公司编码", how="left")
+            total = _safe_float(merged[item_name].sum())
+            merged["占比"] = merged[item_name].apply(lambda value: _safe_ratio_ui(value, total))
+            merged["环比"] = merged.apply(lambda row: _relative_change_value(row[item_name], row.get(previous_value_col)), axis=1)
+            merged["同比"] = merged.apply(lambda row: _relative_change_value(row[item_name], row.get(last_year_value_col)), axis=1)
+            return merged[["公司", item_name, "占比", "环比", "同比"]].sort_values(item_name, ascending=False)
+        current["是否平衡"] = current["差额"].apply(lambda value: "平衡" if abs(_safe_float(value)) <= 1 else "不平衡")
+        return current[["公司", "资产总计", "负债权益总计", "差额", "是否平衡"]].sort_values("差额")
 
-    if prev_period:
-        prev_df = _query_metric_by_group(
-            prev_period,
-            company_codes,
-            cfg["source"],
-            cfg["item_name"],
-        ).rename(columns={"数值": "上期值"})
+    if source in {"budget_income", "budget_profit"}:
+        plan_df = read_budget_plan()
+        actual_df = load_budget_actuals(period)
+        _, detail_df = build_budget_completion_data(plan_df, actual_df, str(period)[4:6])
+        if detail_df.empty:
+            return detail_df
+        if source == "budget_income":
+            columns = ["模块", "公司", "年度收入预算", "累计收入实际", "收入完成率", "时间进度", "收入偏离", "状态"]
+            view = detail_df.rename(
+                columns={
+                    "module": "模块",
+                    "公司名称": "公司",
+                    "unit_name": "公司",
+                    "收入预算": "年度收入预算",
+                    "income_budget": "年度收入预算",
+                    "收入实际": "累计收入实际",
+                    "income_actual": "累计收入实际",
+                    "income_completion": "收入完成率",
+                    "收入进度差": "收入偏离",
+                    "progress": "时间进度",
+                    "income_gap": "收入偏离",
+                    "status": "状态",
+                }
+            )
+        else:
+            columns = ["模块", "公司", "年度利润预算", "累计利润实际", "利润完成率", "时间进度", "利润偏离", "状态"]
+            view = detail_df.rename(
+                columns={
+                    "module": "模块",
+                    "公司名称": "公司",
+                    "unit_name": "公司",
+                    "利润预算": "年度利润预算",
+                    "profit_budget": "年度利润预算",
+                    "利润实际": "累计利润实际",
+                    "profit_actual": "累计利润实际",
+                    "profit_completion": "利润完成率",
+                    "利润进度差": "利润偏离",
+                    "progress": "时间进度",
+                    "profit_gap": "利润偏离",
+                    "status": "状态",
+                }
+            )
+        if "时间进度" not in view.columns:
+            view["时间进度"] = budget_time_progress(str(period)[4:6])
+        return view[[column for column in columns if column in view.columns]]
+
+    return pd.DataFrame()
+
+
+@st.cache_data(show_spinner=False, ttl=60)
+def _home_budget_summary_from_budget_dashboard(period: str) -> dict:
+    period_year = str(period)[:4]
+    budget_year = _home_budget_plan_year()
+    if budget_year and period_year != budget_year:
+        return {}
+    plan_df = read_budget_plan()
+    actual_df = load_budget_actuals(period)
+    overview_df, detail_df = build_budget_completion_data(plan_df, actual_df, str(period)[4:6])
+    if overview_df.empty:
+        return {}
+    total_row = overview_df[overview_df["模块名称"] == "合计"]
+    if total_row.empty:
+        total_row = overview_df.head(1)
+    row = total_row.iloc[0].to_dict()
+    return {
+        "year": str(period)[:4],
+        "income_target": _safe_float(row.get("收入预算")),
+        "profit_target": _safe_float(row.get("利润预算")),
+        "income_actual_ytd": _safe_float(row.get("收入实际")),
+        "profit_actual_ytd": _safe_float(row.get("利润实际")),
+        "income_completion": row.get("收入完成率"),
+        "profit_completion": row.get("利润完成率"),
+        "theory_completion": row.get("时间进度"),
+        "progress": overview_df,
+        "detail": detail_df,
+    }
+
+
+def _home_budget_plan_year() -> str | None:
+    for text_value in (BUDGET_VERSION, BUDGET_WORKBOOK_PATH.name):
+        match = re.search(r"(20\d{2})", str(text_value))
+        if match:
+            return match.group(1)
+    return None
+
+
+def _period_previous_month(period: str) -> str | None:
+    period = str(period)
+    if len(period) != 6 or not period.isdigit():
+        return None
+    year = int(period[:4])
+    month = int(period[4:6])
+    if month <= 1:
+        return f"{year - 1}12"
+    return f"{year}{month - 1:02d}"
+
+
+def _period_same_month_last_year(period: str) -> str | None:
+    period = str(period)
+    if len(period) != 6 or not period.isdigit():
+        return None
+    return f"{int(period[:4]) - 1}{period[4:6]}"
+
+
+def _home_budget_completion_comparisons(period: str, key: str) -> dict:
+    current = _home_budget_summary_from_budget_dashboard(period)
+    previous_period = _period_previous_month(period)
+    last_year_period = _period_same_month_last_year(period)
+    previous = _home_budget_summary_from_budget_dashboard(previous_period) if previous_period else {}
+    last_year = _home_budget_summary_from_budget_dashboard(last_year_period) if last_year_period else {}
+    current_value = current.get(key)
+
+    def diff(other: dict) -> float | None:
+        if not current or not other or current.get("year") != other.get("year"):
+            return None
+        other_value = other.get(key)
+        if current_value is None or other_value is None:
+            return None
+        return _safe_float(current_value) - _safe_float(other_value)
+
+    return {
+        "同比": {"value": diff(last_year), "mode": "point"},
+        "环比": {"value": diff(previous), "mode": "point"},
+    }
+
+
+def _apply_home_budget_kpi_overrides(dashboard: dict, period: str) -> dict:
+    budget = _home_budget_summary_from_budget_dashboard(period)
+    if not budget:
+        return dashboard
+    dashboard["budget"] = budget
+    for kpi in dashboard.get("kpis", []):
+        label = kpi.get("label")
+        if label == "本月收入":
+            kpi["delta"] = budget.get("income_completion")
+        elif label == "收入年度完成率":
+            kpi["value"] = budget.get("income_completion")
+            kpi["comparisons"] = _home_budget_completion_comparisons(period, "income_completion")
+        elif label == "利润年度完成率":
+            kpi["value"] = budget.get("profit_completion")
+            kpi["comparisons"] = _home_budget_completion_comparisons(period, "profit_completion")
+    return dashboard
+
+
+def _metric_drilldown_formatters(df: pd.DataFrame) -> dict:
+    formatters = {}
+    for column in df.columns:
+        text = str(column)
+        if any(token in text for token in ("率", "占比", "偏离", "进度", "贡献", "环比", "同比", "变化")):
+            formatters[column] = lambda value: "-" if pd.isna(value) else f"{float(value) * 100:.2f}%"
+        elif any(token in text for token in ("收入", "利润", "资金", "账款", "预算", "实际", "资产", "负债", "差额")):
+            formatters[column] = lambda value: "-" if pd.isna(value) else f"{float(value):,.2f}"
+    return formatters
+
+
+def _metric_drilldown_highlight(row: pd.Series) -> list[str]:
+    styles = []
+    for value in row:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            styles.append("")
+            continue
+        styles.append("color:#b42318;font-weight:700;" if number < 0 else "")
+    return styles
+
+
+def _metric_drilldown_layer_type(metric_key: str) -> str:
+    return "modal"
+
+
+@st.cache_data(show_spinner=False, ttl=120)
+def _load_metric_drilldown_cached(
+    metric_key: str,
+    period: str,
+    prev_period: str | None,
+    company_codes: tuple[str, ...],
+) -> pd.DataFrame:
+    return _load_metric_drilldown(metric_key, period, prev_period, list(company_codes))
+
+
+def _metric_drilldown_value_html(column: str, value) -> tuple[str, str]:
+    text = str(column)
+    class_names: list[str] = []
+    number_value: float | None = None
+    try:
+        if value is not None and not pd.isna(value):
+            number_value = float(value)
+    except (TypeError, ValueError):
+        number_value = None
+
+    if number_value is not None and any(token in text for token in ("率", "占比", "偏离", "进度", "贡献", "环比", "同比", "变化")):
+        class_names.append("num")
+        display = f"{number_value * 100:.2f}%"
+    elif number_value is not None and any(token in text for token in ("收入", "利润", "资金", "账款", "预算", "实际", "资产", "负债", "差额")):
+        class_names.append("num")
+        display = f"{number_value:,.2f}"
+    elif number_value is not None:
+        display = f"{number_value:,.2f}"
     else:
-        prev_df = pd.DataFrame(columns=["业务板块", "上期值"])
+        empty_display = "暂无" if text in {"环比", "同比"} else "-"
+        display = empty_display if value is None or (isinstance(value, float) and pd.isna(value)) else str(value)
 
-    merged = current_df.merge(prev_df, on="业务板块", how="left")
-    merged["本期值"] = pd.to_numeric(merged["本期值"], errors="coerce").fillna(0.0)
-    merged["上期值"] = pd.to_numeric(merged["上期值"], errors="coerce").fillna(0.0)
-    merged["绝对值"] = merged["本期值"].abs()
-    total_abs = _safe_float(merged["绝对值"].sum())
-    merged["占比(%)"] = 0.0
-    if total_abs > 0:
-        merged["占比(%)"] = (merged["绝对值"] / total_abs * 100).round(2)
-    merged = merged.sort_values(by="占比(%)", ascending=False).reset_index(drop=True)
+    if number_value is not None and number_value < 0:
+        class_names.append("neg")
+    elif number_value is not None and number_value > 0 and any(token in text for token in ("环比", "同比", "变化")):
+        class_names.append("pos")
+    if text in {"是否亏损", "是否平衡", "状态"}:
+        label = str(display)
+        if any(token in label for token in ("亏损", "不平衡", "滞后", "风险")):
+            display = f'<span class="home-detail-tag-risk">{_html(label)}</span>'
+        elif any(token in label for token in ("关注", "待")):
+            display = f'<span class="home-detail-tag-warn">{_html(label)}</span>'
+        elif label and label != "-":
+            display = f'<span class="home-detail-tag-good">{_html(label)}</span>'
+        return display, " ".join(class_names)
+    return _html(display), " ".join(class_names)
 
-    return merged.rename(
-        columns={
-            "本期值": cfg["current_col"],
-            "上期值": cfg["previous_col"],
-        }
+
+def _metric_drilldown_column_class(column: str) -> str:
+    text = str(column)
+    if text == "公司":
+        return "col-company"
+    if text in {"业务板块", "模块"}:
+        return "col-text"
+    if text in {"是否亏损", "是否平衡", "状态"}:
+        return "col-status"
+    if any(token in text for token in ("率", "占比", "偏离", "进度", "贡献", "环比", "同比", "变化")):
+        return "col-percent"
+    if any(token in text for token in ("收入", "利润", "资金", "账款", "预算", "实际", "资产", "负债", "差额")):
+        return "col-number"
+    return "col-text"
+
+
+def _metric_drilldown_sort_href(metric_key: str, column: str, current_sort: str | None, current_order: str | None) -> tuple[str, str, str]:
+    is_active = str(column) == str(current_sort or "")
+    active_order = str(current_order or "asc").lower()
+    next_order = "desc" if is_active and active_order == "asc" else "asc"
+    if is_active:
+        icon = "▲" if active_order == "asc" else "▼"
+        icon_class = "home-detail-sort active"
+    else:
+        icon = "⇅"
+        icon_class = "home-detail-sort"
+    href = f"?drill_metric={quote(str(metric_key))}&drill_sort={quote(str(column))}&drill_order={next_order}"
+    return href, icon, icon_class
+
+
+def _sort_metric_drilldown_df(df: pd.DataFrame, sort_column: str | None, sort_order: str | None) -> pd.DataFrame:
+    if df is None or df.empty or not sort_column or sort_column not in df.columns:
+        return df
+    ascending = str(sort_order or "asc").lower() != "desc"
+    sorted_df = df.copy()
+    column_class = _metric_drilldown_column_class(str(sort_column))
+    if column_class in {"col-number", "col-percent"}:
+        numeric_values = pd.to_numeric(sorted_df[sort_column], errors="coerce")
+        sorted_df["_sort_value"] = numeric_values
+        return sorted_df.sort_values("_sort_value", ascending=ascending, na_position="last").drop(columns=["_sort_value"])
+    return sorted_df.sort_values(sort_column, ascending=ascending, na_position="last", key=lambda series: series.astype(str))
+
+
+def _metric_drilldown_colgroup_html(columns: list[str]) -> str:
+    weights: dict[str, float] = {}
+    for column in columns:
+        class_name = _metric_drilldown_column_class(column)
+        if class_name == "col-company":
+            weights[column] = 1.2
+        else:
+            weights[column] = 1.0
+    total_weight = sum(weights.values()) or 1.0
+    col_tags = []
+    for column in columns:
+        class_name = _metric_drilldown_column_class(column)
+        width = weights[column] / total_weight * 100.0
+        col_tags.append(f'<col class="{_html(class_name)}" style="width:{width:.2f}%">')
+    return f"<colgroup>{''.join(col_tags)}</colgroup>"
+
+
+def _metric_drilldown_table_html(
+    df: pd.DataFrame,
+    metric_key: str = "",
+    current_sort: str | None = None,
+    current_order: str | None = None,
+) -> str:
+    if df is None or df.empty:
+        return '<div class="home-detail-empty">当前范围暂无可展示的下钻数据。</div>'
+    view_df = _sort_metric_drilldown_df(df, current_sort, current_order)
+    table_min_width = max(920, int(ceil(len(view_df.columns) * 145 * 1.05)))
+    headers = []
+    for column in view_df.columns:
+        col_class = _metric_drilldown_column_class(str(column))
+        href, icon, icon_class = _metric_drilldown_sort_href(metric_key, str(column), current_sort, current_order)
+        headers.append(
+            f'<th class="{_html(col_class)}">'
+            f'<a class="home-detail-sort-link" href="{_html(href)}" target="_top" title="按{_html(str(column))}排序">'
+            f'<span class="home-detail-sort-label">{_html(column)}</span><span class="{_html(icon_class)}">{_html(icon)}</span>'
+            '</a></th>'
+        )
+    rows = []
+    for record in view_df.to_dict("records"):
+        cells = []
+        for column in view_df.columns:
+            col_class = _metric_drilldown_column_class(str(column))
+            value_html, class_name = _metric_drilldown_value_html(str(column), record.get(column))
+            class_values = " ".join(value for value in [col_class, class_name] if value)
+            class_attr = f' class="{_html(class_values)}"' if class_values else ""
+            title_attr = f' title="{_html(str(record.get(column)))}"' if record.get(column) is not None else ""
+            cells.append(f"<td{class_attr}{title_attr}>{value_html}</td>")
+        rows.append(f"<tr>{''.join(cells)}</tr>")
+    return f"""
+        <div class="home-detail-table-wrap">
+            <table class="home-detail-table" style="--home-detail-column-count:{len(view_df.columns)}; min-width:max(100%, {table_min_width}px);">
+                {_metric_drilldown_colgroup_html([str(column) for column in view_df.columns])}
+                <thead><tr>{''.join(headers)}</tr></thead>
+                <tbody>{''.join(rows)}</tbody>
+            </table>
+        </div>
+    """
+
+
+def _render_metric_drilldown_layer(
+    metric_key: str,
+    period: str,
+    prev_period: str | None,
+    scope_label: str,
+    company_codes: list[str],
+) -> None:
+    cfg = HOME_DRILL_CONFIG.get(metric_key)
+    if not cfg:
+        return
+    layer_class = f"home-detail-{_metric_drilldown_layer_type(metric_key)}"
+    drill_df = _load_metric_drilldown_cached(metric_key, period, prev_period, tuple(company_codes))
+    sort_column = _get_query_param("drill_sort")
+    sort_order = _get_query_param("drill_order")
+    if sort_order not in {"asc", "desc"}:
+        sort_order = None
+    table_html = _metric_drilldown_table_html(
+        drill_df,
+        metric_key=metric_key,
+        current_sort=sort_column,
+        current_order=sort_order,
     )
+    detail_html = (
+        f'<div class="home-detail-overlay">'
+        f'<div class="home-detail-layer {layer_class}">'
+        '<div class="home-detail-header">'
+        '<div>'
+        f'<div class="home-detail-title">{_html(cfg["label"])}下钻</div>'
+        '<div class="home-detail-subtitle">'
+        f'{_html(_home_period_label(period))} · 范围：{_html(scope_label)} · 点击后按需加载明细'
+        '</div>'
+        '</div>'
+        '<a class="home-detail-close" href="?" target="_top" title="关闭详情层" aria-label="关闭详情层">×</a>'
+        '</div>'
+        f'<div class="home-detail-body">{table_html}</div>'
+        '</div>'
+        '</div>'
+    )
+    st.markdown(detail_html, unsafe_allow_html=True)
 
 
 @st.dialog("📈 指标下钻明细 (第二级)", width="large")
@@ -2908,6 +3693,7 @@ def render_home():
 
     try:
         dashboard = _get_cached_home_dashboard(period, scope_code, tuple(filtered_company_codes))
+        dashboard = _apply_home_budget_kpi_overrides(dashboard, period)
     except Exception as exc:
         st.error(f"首页指标计算失败: {exc}")
         return
@@ -2948,20 +3734,17 @@ def render_home():
         cfg["label"]: metric_key
         for metric_key, cfg in HOME_DRILL_CONFIG.items()
     }
-    _render_bi_kpi_grid(kpis, drill_label_map=drill_label_map)
-    st.caption("提示：点击 KPI 数值可下钻到下一层级，查看构成占比与树状图。")
-
     drill_metric = _get_query_param("drill_metric")
+    _render_bi_kpi_grid(kpis, drill_label_map=drill_label_map, selected_metric_key=drill_metric)
+    st.caption("提示：点击 KPI 数值可在当前页下钻到下一层级，查看构成明细。")
+
     if drill_metric in HOME_DRILL_CONFIG:
-        _clear_query_param("drill_metric")
-        show_metric_drilldown_dialog(
+        _render_metric_drilldown_layer(
             drill_metric,
             period,
             prev_period,
-            scope_code,
             scope_label,
-            business_group=selected_group,
-            company_codes=filtered_company_codes,
+            filtered_company_codes,
         )
 
     _render_html(
@@ -7217,6 +8000,47 @@ def render_multi_operating_summary():
         _render_fixed_template_sheet("经营汇总表", "multi_operating_template")
 
 
+IMPORT_UPLOADER_TOKEN_KEY = "import_uploader_token"
+IMPORT_LAST_REPORT_KEY = "import_last_report"
+
+
+def _get_import_uploader_key(state=None) -> str:
+    state = st.session_state if state is None else state
+    token = int(state.get(IMPORT_UPLOADER_TOKEN_KEY, 0) or 0)
+    if IMPORT_UPLOADER_TOKEN_KEY not in state:
+        state[IMPORT_UPLOADER_TOKEN_KEY] = token
+    return f"import_wizard_files_{token}"
+
+
+def _store_import_result_and_reset_uploader(
+    report_rows: list[dict],
+    success_count: int,
+    fail_count: int,
+    state=None,
+) -> None:
+    state = st.session_state if state is None else state
+    token = int(state.get(IMPORT_UPLOADER_TOKEN_KEY, 0) or 0)
+    state[IMPORT_UPLOADER_TOKEN_KEY] = token + 1
+    state[IMPORT_LAST_REPORT_KEY] = {
+        "success_count": success_count,
+        "fail_count": fail_count,
+        "rows": report_rows,
+    }
+
+
+def _render_last_import_report() -> None:
+    report = st.session_state.get(IMPORT_LAST_REPORT_KEY)
+    if not report:
+        return
+    rows = report.get("rows") or []
+    success_count = int(report.get("success_count") or 0)
+    fail_count = int(report.get("fail_count") or 0)
+    st.markdown("##### 上次入库报告")
+    st.caption(f"导入完成：成功 {success_count} 个，失败 {fail_count} 个。文件选择框已清空，可直接选择下一批。")
+    if rows:
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
 def _render_import_upload_tab():
     _render_html(
         """
@@ -7229,6 +8053,7 @@ def _render_import_upload_tab():
     )
 
     st.markdown('<div class="home-filter-title">采集任务</div>', unsafe_allow_html=True)
+    _render_last_import_report()
     task_col1, task_col2, task_col3, task_col4 = st.columns([1.4, 1.2, 1.2, 1])
     with task_col1:
         manual_type = st.selectbox("数据类型", [""] + REPORT_TYPES_CN, format_func=lambda x: "自动识别" if x == "" else x)
@@ -7246,7 +8071,7 @@ def _render_import_upload_tab():
             "上传 Excel 文件",
             type=["xlsx", "xls"],
             accept_multiple_files=True,
-            key="import_wizard_files",
+            key=_get_import_uploader_key(),
         )
     with action_col:
         file_count = len(uploaded_files or [])
@@ -7327,7 +8152,6 @@ def _render_import_upload_tab():
             if success_count > 0:
                 st.session_state.companies = get_companies()
 
-            st.markdown("##### 入库报告")
             report_rows = []
             for r in results:
                 step_errors = []
@@ -7367,7 +8191,8 @@ def _render_import_upload_tab():
                             "说明": f"{err} {detail}".strip(),
                         }
                     )
-            st.dataframe(pd.DataFrame(report_rows), use_container_width=True, hide_index=True)
+            _store_import_result_and_reset_uploader(report_rows, success_count, fail_count)
+            st.rerun()
     else:
         st.info("请先上传需要采集的 Excel 文件。")
 

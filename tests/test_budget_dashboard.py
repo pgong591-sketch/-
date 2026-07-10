@@ -106,6 +106,18 @@ def test_home_dashboard_recalculates_ratios_and_uses_budget_overrides():
             """,
             rows,
         )
+        conn.executemany(
+            """
+            INSERT INTO pl_detail
+                (company_code, period, item_code, item_name, category, amount)
+            VALUES ('001', '202603', ?, ?, ?, ?)
+            """,
+            [
+                ("REV", "收入合计", "收入", 300.0),
+                ("PROFIT", "净利润", "利润", 60.0),
+                ("COST", "成本费用合计", "成本", 120.0),
+            ],
+        )
         balance_rows = [
             ("001", "202603", "资产", "货币资金", 1000.0),
             ("001", "202603", "资产", "其他应收款", 100.0),

@@ -137,6 +137,31 @@ def _resolve_company_candidate(text: str) -> Optional[str]:
     return None
 
 
+def _normalize_company_code(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if re.fullmatch(r"\d{3,}", text):
+        return text
+    try:
+        code, _source = resolve_company_code(text)
+    except Exception:
+        code = None
+    return str(code or text).strip()
+
+
+def _looks_like_period_number(value: Any) -> bool:
+    text = str(value or "").strip()
+    if re.fullmatch(r"(?:19|20)\d{2}", text):
+        return True
+    return bool(re.fullmatch(r"(?:19|20)\d{2}(?:0[1-9]|1[0-2])", text))
+
+
+def _is_company_code_candidate(value: Any) -> bool:
+    text = str(value or "").strip()
+    return bool(re.fullmatch(r"\d{3,}", text)) and not _looks_like_period_number(text)
+
+
 def identify_report_type(
     file_path: str,
     df: Optional[pd.DataFrame] = None,
@@ -527,7 +552,7 @@ class AccountBalanceParser(BaseParser):
                 df[col] = self._normalize_numeric(df[col])
 
         # 填充公司、期间
-        df["company_code"] = company or ""
+        df["company_code"] = _normalize_company_code(company)
         df["period"] = period or ""
 
         # 填充余额方向
@@ -700,7 +725,7 @@ class PlDetailParser(BaseParser):
         df = self._clean_df(df)
         df = df.rename(columns=self.COLUMN_MAPPING)
 
-        company = kwargs.get("company_code") or self.company_code or ""
+        company = _normalize_company_code(kwargs.get("company_code") or self.company_code or "")
         period = kwargs.get("period") or self.period or ""
 
         df["company_code"] = company
@@ -784,7 +809,23 @@ class PlDetailParser(BaseParser):
         if not rows:
             self.errors.append("未解析到收入成本费用表明细或汇总数据")
             return pd.DataFrame()
-        return pd.DataFrame(rows)
+        return self._stabilize_income_cost_item_codes(pd.DataFrame(rows))
+
+    def _stabilize_income_cost_item_codes(self, df: pd.DataFrame) -> pd.DataFrame:
+        if len(df) == 0 or not {"item_code", "item_name", "dept_code"}.issubset(df.columns):
+            return df
+        result = df.copy()
+        key_cols = ["company_code", "period", "item_code", "dept_code"]
+        for _, group in result.groupby(key_cols, dropna=False):
+            item_names = group["item_name"].fillna("").astype(str).str.strip()
+            if len(group) <= 1 or item_names.nunique() <= 1:
+                continue
+            for idx in group.index:
+                base_code = str(result.at[idx, "item_code"] or "").strip()
+                item_name = str(result.at[idx, "item_name"] or "").strip()
+                suffix = re.sub(r"\W+", "_", item_name, flags=re.UNICODE).strip("_")
+                result.at[idx, "item_code"] = f"{base_code}__{suffix or idx}"
+        return result
 
     def _find_income_cost_header(self, raw: pd.DataFrame) -> Optional[int]:
         for idx in range(min(len(raw), 20)):
@@ -812,22 +853,49 @@ class PlDetailParser(BaseParser):
         source_name: Optional[str] = None,
     ) -> str:
         if fallback:
-            return str(fallback).strip()
+            return _normalize_company_code(fallback)
+        header_idx = self._find_income_cost_header(raw)
+        if header_idx is None:
+            scan_limit = 8
+        else:
+            scan_limit = max(0, min(header_idx, 8))
+        top = raw.head(scan_limit).fillna("").astype(str)
+        top_text = " ".join(top.values.flatten().tolist())
+
+        explicit_code = re.search(
+            r"(?:单位编码|单位代码|公司编码|公司代码|(?<!科目)(?<!项目)编码)\s*[:：]?\s*(\d{3,})",
+            top_text,
+        )
+        if explicit_code and _is_company_code_candidate(explicit_code.group(1)):
+            return explicit_code.group(1).strip()
+
+        unit_name_candidate = ""
+        for _, row in top.iterrows():
+            row_text = " ".join(str(value).strip() for value in row.tolist() if str(value).strip())
+            if "单位" not in row_text:
+                continue
+            unit_text_match = re.search(r"单位[:：]\s*(.+)", row_text)
+            unit_text = unit_text_match.group(1).strip() if unit_text_match else row_text
+            for candidate in re.findall(r"\d{3,}", unit_text):
+                if _is_company_code_candidate(candidate):
+                    return candidate.strip()
+            name_match = re.search(r"^([^\s]+)", unit_text)
+            if name_match and not unit_name_candidate:
+                unit_name_candidate = name_match.group(1).strip()
+                normalized = _normalize_company_code(unit_name_candidate)
+                if normalized and normalized != unit_name_candidate:
+                    return normalized
+
+        for _, row in top.iterrows():
+            for value in row.tolist():
+                cell_text = str(value).strip()
+                if _is_company_code_candidate(cell_text):
+                    return cell_text
         source_code = _resolve_company_candidate(source_name or "")
         if source_code:
             return source_code
-        top = raw.head(8).fillna("").astype(str)
-        for _, row in top.iterrows():
-            for value in row.tolist():
-                text = str(value).strip()
-                if re.fullmatch(r"\d{3,}", text):
-                    return text
-        text = " ".join(top.values.flatten().tolist())
-        m = re.search(r"单位[:：]\s*([^\s]+)", text)
-        if m:
-            company_name = m.group(1).strip()
-            code = _resolve_company_candidate(company_name)
-            return code or company_name
+        if unit_name_candidate:
+            return unit_name_candidate
         return ""
 
     def _income_cost_category(self, item_name: str, income_section: bool) -> str:

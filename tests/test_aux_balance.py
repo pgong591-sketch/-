@@ -4,7 +4,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
-from src.import_parser import AccountBalanceParser, identify_report_type
+import pytest
+
+from src.import_parser import AccountBalanceParser, identify_report_type, parse_file
+from src.report_types import RT_ACCOUNT_BALANCE
 from src.validators import validate_report_data
 
 
@@ -111,6 +114,25 @@ def test_filename_extract():
 
         assert period == exp_period, f"'{fname}': period={period}, 期望={exp_period}"
         print(f"  ✅ '{fname}' -> period={period}, company={company}")
+
+
+def test_real_202503_chashan_preschool_aux_balance_maps_company_code_if_available(monkeypatch):
+    path = Path("/Users/pokzzz1163.com/Desktop/202503/资料库/科目余额表/202503茶山学前科目辅助余额表.xls")
+    if not path.exists():
+        pytest.skip(f"真实样本不存在: {path}")
+
+    def fake_resolve_company_code(name):
+        return ("101010131", "test") if name == "茶山学前" else (None, "none")
+
+    monkeypatch.setattr("src.import_parser.resolve_company_code", fake_resolve_company_code)
+
+    df, report_type, info = parse_file(str(path), original_filename=path.name)
+    validation = validate_report_data(df, "account_balance")
+
+    assert report_type == RT_ACCOUNT_BALANCE
+    assert info["errors"] == []
+    assert validation.is_valid
+    assert set(df["company_code"]) == {"101010131"}
 
 
 if __name__ == "__main__":
