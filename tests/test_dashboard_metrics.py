@@ -573,6 +573,8 @@ def test_home_card_group_modal_contract_and_lazy_loading():
     assert "_render_funds_turnover_risk_panel" in render_source
     assert "_home_company_rank_summary_for_scope" in render_source
     assert "_home_operating_anomaly_summary_counts_for_scope" in render_source
+    assert "_home_funds_summary_for_scope" in render_source
+    assert "_home_funds_rows_for_scope" not in render_source
     assert "_home_company_rank_detail_for_scope(period" not in render_source
     assert "_home_operating_anomaly_detail_for_scope(period" not in render_source
     assert "_render_health_panel(" not in render_source
@@ -588,6 +590,8 @@ def test_home_card_group_modal_contract_and_lazy_loading():
     assert "_load_home_card_group_detail_cached" not in company_rank_panel_source
     assert "_load_home_card_group_detail_cached" not in anomaly_panel_source
     assert "_load_home_card_group_detail_cached" not in funds_risk_panel_source
+    assert "_home_funds_rows_for_scope" not in funds_safety_panel_source
+    assert "_home_funds_rows_for_scope" not in funds_risk_panel_source
     assert "_load_home_card_group_detail_cached" in layer_source
     assert "home-detail-overlay" in layer_source
     assert "home-detail-modal" in layer_source

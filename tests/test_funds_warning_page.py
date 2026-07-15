@@ -58,6 +58,63 @@ def test_funds_warning_formulas_and_statuses():
     assert rows.loc["C", "资金状态"] == "资金安全"
 
 
+def test_funds_warning_summary_rows_share_core_calculation_with_detail_rows():
+    balances = pd.DataFrame(
+        [
+            {"company_code": "A", "cash": 100.0, "other_receivable": 50.0, "other_payable": 30.0},
+            {"company_code": "B", "cash": 200.0, "other_receivable": 40.0, "other_payable": 40.0},
+            {"company_code": "C", "cash": 600.0, "other_receivable": 0.0, "other_payable": 0.0},
+        ]
+    )
+    costs = pd.DataFrame(
+        [
+            {"company_code": "A", "avg_operating_cost": 100.0, "cost_period_count": 6},
+            {"company_code": "B", "avg_operating_cost": 100.0, "cost_period_count": 6},
+            {"company_code": "C", "avg_operating_cost": 100.0, "cost_period_count": 6},
+        ]
+    )
+
+    detail = app._funds_warning_build_rows(_companies(), balances, costs).set_index("company_code")
+    summary = app._funds_warning_build_summary_rows(_companies(), balances, costs).set_index("company_code")
+
+    assert "实收资本未达账" in detail.columns
+    assert "实收资本未达账" not in summary.columns
+    for column in ["货币资金", "其他应收款", "其他应付款", "可使用周转资金", "近6月平均经营成本", "资金周转系数", "资金状态"]:
+        assert summary[column].to_dict() == detail[column].to_dict()
+
+
+def test_home_funds_summary_matches_warning_kpis_and_top_risk_rows():
+    rows = app._funds_warning_build_summary_rows(
+        _companies(),
+        pd.DataFrame(
+            [
+                {"company_code": "A", "cash": 100.0, "other_receivable": 50.0, "other_payable": 30.0},
+                {"company_code": "B", "cash": 200.0, "other_receivable": 40.0, "other_payable": 40.0},
+                {"company_code": "C", "cash": 600.0, "other_receivable": 0.0, "other_payable": 0.0},
+            ]
+        ),
+        pd.DataFrame(
+            [
+                {"company_code": "A", "avg_operating_cost": 100.0, "cost_period_count": 6},
+                {"company_code": "B", "avg_operating_cost": 100.0, "cost_period_count": 6},
+                {"company_code": "C", "avg_operating_cost": 100.0, "cost_period_count": 6},
+            ]
+        ),
+    )
+
+    summary = app._home_funds_summary_from_rows(rows)
+
+    assert summary["货币资金合计"] == 900.0
+    assert summary["其他应收款合计"] == 90.0
+    assert summary["其他应付款合计"] == 70.0
+    assert summary["可使用周转资金合计"] == 920.0
+    assert round(summary["集团资金周转系数"], 4) == round(app._funds_warning_group_turnover_ratio(rows), 4)
+    assert summary["资金紧张公司数"] == 1
+    assert summary["资金关注公司数"] == 1
+    assert summary["资金安全公司数"] == 1
+    assert summary["风险Top5"]["公司/校区"].tolist() == ["A校区", "B校区"]
+
+
 def test_funds_warning_defaults_only_show_warning_companies():
     rows = pd.DataFrame(
         [
