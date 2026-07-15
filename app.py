@@ -2769,8 +2769,17 @@ def _home_expense_analysis_detail_for_scope(period: str, company_codes: list[str
     )
 
 
-@st.cache_data(show_spinner=False, ttl=120)
 def _home_funds_warning_rows_for_period(period: str) -> pd.DataFrame:
+    db_path, db_signature = _funds_warning_db_signature()
+    return _home_funds_warning_rows_for_period_cached(str(period), db_path, db_signature)
+
+
+@st.cache_data(show_spinner=False, ttl=120)
+def _home_funds_warning_rows_for_period_cached(
+    period: str,
+    db_path: str,
+    db_signature: tuple[tuple[str, int, int, int], ...],
+) -> pd.DataFrame:
     companies = _funds_warning_company_frame()
     balances = _funds_warning_balance_metrics(period)
     costs = _funds_warning_cost_metrics(period)
@@ -2787,19 +2796,72 @@ def _home_funds_rows_for_scope(period: str, company_codes: tuple[str, ...]) -> p
     return rows.copy()
 
 
+def _home_funds_summary_from_rows(rows: pd.DataFrame) -> dict:
+    rows = rows if isinstance(rows, pd.DataFrame) else pd.DataFrame()
+    if rows.empty:
+        return {
+            "货币资金合计": 0.0,
+            "其他应收款合计": 0.0,
+            "其他应付款合计": 0.0,
+            "可使用周转资金合计": 0.0,
+            "集团资金周转系数": None,
+            "资金紧张公司数": 0,
+            "资金关注公司数": 0,
+            "资金安全公司数": 0,
+            "风险Top5": pd.DataFrame(columns=["公司/校区", "资金周转系数", "资金状态"]),
+            "公司数": 0,
+        }
+    return {
+        "货币资金合计": _funds_card_money_sum(rows, "货币资金"),
+        "其他应收款合计": _funds_card_money_sum(rows, "其他应收款"),
+        "其他应付款合计": _funds_card_money_sum(rows, "其他应付款"),
+        "可使用周转资金合计": _funds_card_money_sum(rows, "可使用周转资金"),
+        "集团资金周转系数": _funds_warning_group_turnover_ratio(rows),
+        "资金紧张公司数": int((rows.get("资金状态", pd.Series(dtype=str)) == "资金紧张").sum()),
+        "资金关注公司数": int((rows.get("资金状态", pd.Series(dtype=str)) == "资金关注").sum()),
+        "资金安全公司数": int((rows.get("资金状态", pd.Series(dtype=str)) == "资金安全").sum()),
+        "风险Top5": _funds_risk_rows(rows).head(5)[["公司/校区", "资金周转系数", "资金状态"]].copy(),
+        "公司数": int(len(rows)),
+    }
+
+
+def _home_funds_summary_for_scope(period: str, company_codes: tuple[str, ...]) -> dict:
+    db_path, db_signature = _funds_warning_db_signature()
+    return _home_funds_summary_for_scope_cached(str(period), tuple(company_codes), db_path, db_signature)
+
+
+@st.cache_data(show_spinner=False, ttl=120)
+def _home_funds_summary_for_scope_cached(
+    period: str,
+    company_codes: tuple[str, ...],
+    db_path: str,
+    db_signature: tuple[tuple[str, int, int, int], ...],
+) -> dict:
+    companies = _funds_warning_company_frame()
+    balances = _funds_warning_balance_metrics(period)
+    costs = _funds_warning_cost_metrics(period)
+    rows = _funds_warning_build_summary_rows(companies, balances, costs)
+    if rows is not None and not rows.empty and company_codes and "company_code" in rows.columns:
+        selected = {str(code) for code in company_codes}
+        rows = rows[rows["company_code"].astype(str).isin(selected)].copy()
+    return _home_funds_summary_from_rows(rows)
+
+
 def _funds_card_money_sum(rows: pd.DataFrame, column: str) -> float:
     if rows is None or rows.empty or column not in rows.columns:
         return 0.0
     return _safe_float(pd.to_numeric(rows[column], errors="coerce").fillna(0.0).sum())
 
 
-def _render_funds_safety_panel(rows: pd.DataFrame, selected_group_key: str | None = None) -> str:
-    rows = rows if isinstance(rows, pd.DataFrame) else pd.DataFrame()
-    cash = _funds_card_money_sum(rows, "货币资金")
-    receivable = _funds_card_money_sum(rows, "其他应收款")
-    payable = _funds_card_money_sum(rows, "其他应付款")
-    available = _funds_card_money_sum(rows, "可使用周转资金")
-    group_ratio = _funds_warning_group_turnover_ratio(rows)
+def _render_funds_safety_panel(summary: dict | pd.DataFrame, selected_group_key: str | None = None) -> str:
+    if isinstance(summary, pd.DataFrame):
+        summary = _home_funds_summary_from_rows(summary)
+    summary = summary if isinstance(summary, dict) else {}
+    cash = _safe_float(summary.get("货币资金合计"))
+    receivable = _safe_float(summary.get("其他应收款合计"))
+    payable = _safe_float(summary.get("其他应付款合计"))
+    available = _safe_float(summary.get("可使用周转资金合计"))
+    group_ratio = summary.get("集团资金周转系数")
     components = [
         ("货币资金", cash, "good"),
         ("其他应收", receivable, "good"),
@@ -2840,12 +2902,15 @@ def _funds_risk_rows(rows: pd.DataFrame) -> pd.DataFrame:
     return _funds_warning_sort_rows(risk_rows, "按风险从高到低")
 
 
-def _render_funds_turnover_risk_panel(rows: pd.DataFrame, selected_group_key: str | None = None) -> str:
-    rows = rows if isinstance(rows, pd.DataFrame) else pd.DataFrame()
-    tight_count = int((rows.get("资金状态", pd.Series(dtype=str)) == "资金紧张").sum()) if not rows.empty else 0
-    watch_count = int((rows.get("资金状态", pd.Series(dtype=str)) == "资金关注").sum()) if not rows.empty else 0
-    safe_count = int((rows.get("资金状态", pd.Series(dtype=str)) == "资金安全").sum()) if not rows.empty else 0
-    risk_rows = _funds_risk_rows(rows).head(5)
+def _render_funds_turnover_risk_panel(summary: dict | pd.DataFrame, selected_group_key: str | None = None) -> str:
+    if isinstance(summary, pd.DataFrame):
+        summary = _home_funds_summary_from_rows(summary)
+    summary = summary if isinstance(summary, dict) else {}
+    tight_count = int(summary.get("资金紧张公司数") or 0)
+    watch_count = int(summary.get("资金关注公司数") or 0)
+    safe_count = int(summary.get("资金安全公司数") or 0)
+    risk_rows = summary.get("风险Top5")
+    risk_rows = risk_rows if isinstance(risk_rows, pd.DataFrame) else pd.DataFrame()
     if risk_rows.empty:
         risk_html = '<div class="bi-empty">当前范围暂无资金紧张或关注公司</div>'
     else:
@@ -5768,7 +5833,7 @@ def render_home():
             filtered_company_codes,
         )
     expense_analysis = _home_expense_analysis_for_scope(period, tuple(filtered_company_codes))
-    funds_warning_rows = _home_funds_rows_for_scope(period, tuple(filtered_company_codes))
+    funds_summary = _home_funds_summary_for_scope(period, tuple(filtered_company_codes))
     company_rank_summary = _home_company_rank_summary_for_scope(period, tuple(filtered_company_codes))
     operating_anomaly_counts = _home_operating_anomaly_summary_counts_for_scope(period, tuple(filtered_company_codes))
 
@@ -5779,9 +5844,9 @@ def render_home():
             {_render_operating_summary_panel(_home_operating_summary_for_scope(period, tuple(filtered_company_codes)), selected_home_group)}
             {_render_expense_analysis_panel(expense_analysis, selected_home_group)}
             {_render_company_profit_rank_panel(company_rank_summary, selected_home_group)}
-            {_render_funds_safety_panel(funds_warning_rows, selected_home_group)}
+            {_render_funds_safety_panel(funds_summary, selected_home_group)}
             {_render_operating_anomaly_panel(operating_anomaly_counts, selected_home_group)}
-            {_render_funds_turnover_risk_panel(funds_warning_rows, selected_home_group)}
+            {_render_funds_turnover_risk_panel(funds_summary, selected_home_group)}
         </div>
         """
     )
@@ -7795,6 +7860,18 @@ FUNDS_WARNING_BALANCE_NAME_ROOT = {
 }
 
 
+def _funds_warning_db_signature() -> tuple[str, tuple[tuple[str, int, int, int], ...]]:
+    path = get_db_path()
+    signature: list[tuple[str, int, int, int]] = []
+    for candidate in (path, Path(f"{path}-wal"), Path(f"{path}-shm")):
+        try:
+            stat = candidate.stat()
+            signature.append((str(candidate), 1, stat.st_mtime_ns, stat.st_size))
+        except FileNotFoundError:
+            signature.append((str(candidate), 0, 0, 0))
+    return str(path), tuple(signature)
+
+
 def _funds_warning_period_options() -> list[str]:
     try:
         rows = execute_sql(
@@ -7995,9 +8072,44 @@ def _funds_warning_row_status(row) -> str:
     return _funds_warning_status(row.get("资金周转系数"))
 
 
-def _funds_warning_build_rows(companies: pd.DataFrame, balances: pd.DataFrame, costs: pd.DataFrame) -> pd.DataFrame:
+def _funds_warning_core_rows(
+    companies: pd.DataFrame,
+    balances: pd.DataFrame,
+    costs: pd.DataFrame,
+    *,
+    include_detail_columns: bool,
+) -> pd.DataFrame:
+    detail_columns = [
+        "company_code",
+        "business_group",
+        "公司/校区",
+        "has_balance_data",
+        "货币资金",
+        "其他应收款",
+        "其他应付款",
+        "实收资本未达账",
+        "可使用周转资金",
+        "近6月平均经营成本",
+        "资金周转系数",
+        "资金状态",
+        "cost_period_count",
+    ]
+    summary_columns = [
+        "company_code",
+        "business_group",
+        "公司/校区",
+        "has_balance_data",
+        "货币资金",
+        "其他应收款",
+        "其他应付款",
+        "可使用周转资金",
+        "近6月平均经营成本",
+        "资金周转系数",
+        "资金状态",
+    ]
+    output_columns = detail_columns if include_detail_columns else summary_columns
     if len(companies) == 0:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=output_columns)
     df = companies.copy()
     df["company_code"] = df["code"].astype(str)
     if "business_group" not in df.columns:
@@ -8020,23 +8132,7 @@ def _funds_warning_build_rows(companies: pd.DataFrame, balances: pd.DataFrame, c
     has_cost_data = df["avg_operating_cost"].notna() | df["cost_period_count"].notna()
     df = df[df["has_balance_data"] | has_cost_data].copy()
     if len(df) == 0:
-        return pd.DataFrame(
-            columns=[
-                "company_code",
-                "business_group",
-                "公司/校区",
-                "has_balance_data",
-                "货币资金",
-                "其他应收款",
-                "其他应付款",
-                "实收资本未达账",
-                "可使用周转资金",
-                "近6月平均经营成本",
-                "资金周转系数",
-                "资金状态",
-                "cost_period_count",
-            ]
-        )
+        return pd.DataFrame(columns=output_columns)
     for col in ["货币资金", "其他应收款", "其他应付款", "avg_operating_cost"]:
         if col not in df.columns:
             df[col] = 0.0
@@ -8053,23 +8149,15 @@ def _funds_warning_build_rows(companies: pd.DataFrame, balances: pd.DataFrame, c
     missing_balance_mask = ~df["has_balance_data"]
     df.loc[missing_balance_mask, ["货币资金", "其他应收款", "其他应付款", "可使用周转资金"]] = pd.NA
     df["资金状态"] = df.apply(_funds_warning_row_status, axis=1)
-    return df[
-        [
-            "company_code",
-            "business_group",
-            "公司/校区",
-            "has_balance_data",
-            "货币资金",
-            "其他应收款",
-            "其他应付款",
-            "实收资本未达账",
-            "可使用周转资金",
-            "近6月平均经营成本",
-            "资金周转系数",
-            "资金状态",
-            "cost_period_count",
-        ]
-    ]
+    return df[output_columns]
+
+
+def _funds_warning_build_rows(companies: pd.DataFrame, balances: pd.DataFrame, costs: pd.DataFrame) -> pd.DataFrame:
+    return _funds_warning_core_rows(companies, balances, costs, include_detail_columns=True)
+
+
+def _funds_warning_build_summary_rows(companies: pd.DataFrame, balances: pd.DataFrame, costs: pd.DataFrame) -> pd.DataFrame:
+    return _funds_warning_core_rows(companies, balances, costs, include_detail_columns=False)
 
 
 def _funds_warning_filter_scope_rows(rows: pd.DataFrame, view_scope: str) -> pd.DataFrame:
