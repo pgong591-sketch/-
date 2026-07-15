@@ -61,6 +61,32 @@ def test_focus_expense_analysis_keeps_management_fee_separate():
     assert "单独提示" in analysis["conclusion"]
 
 
+def test_focus_expense_analysis_reports_positive_other_fee_bridge():
+    source = _source_rows()
+    source.loc[source["source_item_name"] == "成本费用合计", "current_amount"] = 1200.0
+
+    analysis = app.build_focus_expense_analysis(source)
+    bridge = analysis["expense_bridge"]
+
+    assert bridge["label"] == "其他费用"
+    assert bridge["six_category_total"] == 986.0
+    assert bridge["management_fee"] == 90.0
+    assert bridge["other_fee"] == 124.0
+    assert bridge["raw_difference"] == 124.0
+    assert "成本费用合计 = 六类重点费用 + 管理费服务费 + 其他费用" in analysis["conclusion"]
+
+
+def test_focus_expense_analysis_reports_negative_bridge_as_check_difference():
+    analysis = app.build_focus_expense_analysis(_source_rows())
+    bridge = analysis["expense_bridge"]
+
+    assert bridge["label"] == "待核对差额"
+    assert bridge["other_fee"] == 0.0
+    assert bridge["check_difference"] == 76.0
+    assert bridge["raw_difference"] == -76.0
+    assert "待核对差额" in analysis["conclusion"]
+
+
 def test_focus_expense_analysis_depreciation_does_not_double_count_total_row():
     analysis = app.build_focus_expense_analysis(_source_rows())
 

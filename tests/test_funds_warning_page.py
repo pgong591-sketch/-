@@ -455,6 +455,17 @@ def test_funds_warning_table_html_has_finance_table_contract():
     assert "&lt;" not in html
 
 
+def test_funds_warning_table_styles_freeze_header_and_company_column():
+    css = app._funds_warning_styles()
+
+    assert ".funds-warning-table-wrap" in css
+    assert "overflow:auto" in css
+    assert "max-height:68vh" in css
+    assert ".funds-warning-table th { position:sticky; top:0; z-index:4" in css
+    assert ".funds-warning-table th:first-child { left:0; z-index:7" in css
+    assert ".funds-warning-table td:first-child { position:sticky; left:0; z-index:3" in css
+
+
 def test_funds_warning_styles_align_query_button_without_global_css():
     css = app._funds_warning_styles()
 

@@ -346,6 +346,8 @@ def _picture_brief_rows_for_metrics(metrics: dict[str, tuple[float, float, float
 
 def test_picture_brief_kpis_use_pl_detail_amount_and_ytd(monkeypatch):
     monkeypatch.setattr(app, "_picture_brief_pl_detail_rows", lambda period: _picture_brief_pl_fixture())
+    monkeypatch.setattr(app, "_picture_brief_company_descendants", lambda code, include_root=False: ["1010101", "1010102"])
+    monkeypatch.setattr(app, "_picture_brief_quality_income_target", lambda: 300000.0)
 
     month_kpis = app._picture_brief_kpis_from_pl_detail("202603", "月报")
     ytd_kpis = app._picture_brief_kpis_from_pl_detail("202603", "本年累计")
@@ -362,9 +364,9 @@ def test_picture_brief_kpis_use_pl_detail_amount_and_ytd(monkeypatch):
         "本年累计收入",
         "经营净利润",
         "净利率",
-        "人工",
-        "租金",
-        "成本费用合计",
+        "素质中心完成任务情况",
+        "已完成比例",
+        "目标",
     ]
     assert dict(month_kpis)["本月经营收入"] == "15"
     assert dict(month_kpis)["经营净利润"] == "1"
@@ -373,7 +375,9 @@ def test_picture_brief_kpis_use_pl_detail_amount_and_ytd(monkeypatch):
     assert dict(month_kpis)["租金"] == "0"
     assert dict(ytd_kpis)["本年累计收入"] == "45"
     assert dict(ytd_kpis)["经营净利润"] == "3"
-    assert dict(ytd_kpis)["人工"] == "6"
+    assert dict(ytd_kpis)["素质中心完成任务情况"] == "9"
+    assert dict(ytd_kpis)["已完成比例"] == "30%"
+    assert dict(ytd_kpis)["目标"] == "30"
 
 
 def test_picture_brief_quality_section_uses_confirmed_scopes(monkeypatch):
@@ -416,12 +420,14 @@ def test_picture_brief_operating_context_reuses_one_pl_detail_query(monkeypatch)
     monkeypatch.setattr(app, "_picture_brief_pl_detail_rows", fake_rows)
     monkeypatch.setattr(app, "_picture_brief_db_signature", lambda: ("test.db", 1))
     monkeypatch.setattr(app, "_picture_brief_company_tree_rows_cached", lambda db_path, db_mtime: company_tree)
+    monkeypatch.setattr(app, "_picture_brief_quality_income_target", lambda: 300000.0)
 
     context = app._picture_brief_operating_context("202603")
 
     assert calls == ["202603"]
     assert dict(context["month_kpis"])["本月经营收入"] == "15"
     assert dict(context["ytd_kpis"])["本年累计收入"] == "45"
+    assert dict(context["ytd_kpis"])["素质中心完成任务情况"] == "9"
     assert context["month_quality_rows"][1] == ["收入", "3", "3", "4", "5", "15", "", ""]
 
 
@@ -587,7 +593,7 @@ def test_picture_brief_styles_align_text_and_constrain_campus_columns():
     assert "line-height: 1.42;" in css
     assert "max-width: min(100%, 1680px)" in css
     assert "grid-template-columns: repeat(6, minmax(140px, 1fr))" in css
-    assert ".picture-brief-table-scroll { overflow-x: auto; width: 100%; }" in css
+    assert ".picture-brief-table-scroll { overflow: auto; width: 100%; max-height: 70vh; }" in css
     assert "width: 100%;" in css
     assert "min-width: 720px;" in css
     assert "table-layout: fixed;" in css
@@ -602,6 +608,10 @@ def test_picture_brief_styles_align_text_and_constrain_campus_columns():
     assert "min-width: 920px;" in css
     assert "max-width: none;" in css
     assert ".picture-brief-trend-grid" in css
+    assert ".picture-brief-table tr.picture-brief-header-row td" in css
+    assert "position: sticky;" in css
+    assert ".picture-brief-wide-table td:first-child" in css
+    assert "z-index: 7;" in css
 
 
 def test_picture_brief_table_html_uses_colgroup_for_uniform_widths():
@@ -614,9 +624,12 @@ def test_picture_brief_table_html_uses_colgroup_for_uniform_widths():
     )
 
     assert '<col class="picture-brief-first-col">' in html
-    assert html.count('class="picture-brief-data-col"') == 7
-    assert 'style="min-width:1136px"' in html
+    assert html.count('class="picture-brief-data-col"') == 5
+    assert 'style="min-width:860px"' in html
+    assert 'picture-brief-wide-table' in html
     assert "尔遇管理中心" in html
+    assert "同比增长" not in html
+    assert "收入占比" not in html
     assert "picture-brief-num" in html
 
 

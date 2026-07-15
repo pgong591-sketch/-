@@ -54,6 +54,7 @@ from src.dashboard_metrics import (
     COST_ITEMS,
     INCOME_ITEM,
     NET_PROFIT_ITEM,
+    PL_COST_TOTAL_ITEM,
     PL_NET_PROFIT_ITEM,
     PL_REVENUE_ITEM,
     get_dashboard_periods,
@@ -99,6 +100,7 @@ from src.base_settings_service import (
 )
 from src.filter_options_service import (
     apply_internal_management_fee_elimination,
+    get_consolidation_company_codes,
     get_report_company_scope,
     get_workspace_company_options,
 )
@@ -1072,6 +1074,33 @@ PAGE_CSS = """
         color: #64748b;
     }
 
+    .home-detail-bridge-note {
+        margin-top: 0.56rem;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.38rem 0.55rem;
+        align-items: center;
+        color: #475569;
+        font-size: 0.78rem;
+        line-height: 1.45;
+    }
+
+    .home-detail-bridge-note strong {
+        color: #18314f;
+        font-weight: 760;
+    }
+
+    .home-detail-bridge-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.18rem;
+        border: 1px solid #dbe5f1;
+        border-radius: 999px;
+        padding: 0.12rem 0.48rem;
+        background: #f8fbff;
+        white-space: nowrap;
+    }
+
     .home-detail-close {
         flex: 0 0 auto;
         width: 2rem;
@@ -1106,7 +1135,8 @@ PAGE_CSS = """
 
     .home-detail-table-wrap {
         width: 100%;
-        overflow-x: auto;
+        overflow: auto;
+        max-height: calc(88vh - 10.5rem);
         border: 1px solid #dbe5f1;
         border-radius: 12px;
         background: #ffffff;
@@ -1142,9 +1172,30 @@ PAGE_CSS = """
     }
 
     .home-detail-table th {
+        position: sticky;
+        top: 0;
+        z-index: 4;
         background: #eaf3ff;
         color: #18314f;
         font-weight: 760;
+    }
+
+    .home-detail-table th:first-child {
+        left: 0;
+        z-index: 7;
+        box-shadow: 2px 0 0 rgba(148, 163, 184, 0.24);
+    }
+
+    .home-detail-table td:first-child {
+        position: sticky;
+        left: 0;
+        z-index: 3;
+        background: #ffffff;
+        box-shadow: 2px 0 0 rgba(148, 163, 184, 0.18);
+    }
+
+    .home-detail-table tbody tr:nth-child(even) td:first-child {
+        background: #fbfdff;
     }
 
     .home-detail-sort-link {
@@ -1175,6 +1226,29 @@ PAGE_CSS = """
 
     .home-detail-sort.active {
         color: #2563eb;
+    }
+
+    .home-detail-back {
+        display: inline-flex;
+        align-items: center;
+        width: fit-content;
+        margin-bottom: 0.32rem;
+        color: #2563eb;
+        font-size: 0.82rem;
+        font-weight: 760;
+        text-decoration: none;
+    }
+
+    .home-detail-row-link {
+        color: #1d4ed8;
+        font-weight: 820;
+        text-decoration: none;
+        border-bottom: 1px solid rgba(29, 78, 216, 0.35);
+    }
+
+    .home-detail-row-link:hover {
+        color: #1e40af;
+        border-bottom-color: rgba(30, 64, 175, 0.75);
     }
 
     .home-detail-table td.num {
@@ -1551,6 +1625,10 @@ PAGE_CSS = """
         margin: 0.8rem 0;
     }
 
+    .bi-section-grid > .home-card-group-company-profit-rank {
+        grid-column: 1 / -1;
+    }
+
     .bi-two-col {
         display: grid;
         grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
@@ -1564,6 +1642,24 @@ PAGE_CSS = """
         border-radius: 8px;
         padding: 0.88rem;
         min-height: 100%;
+    }
+
+    .home-card-group-link {
+        display: block;
+        color: inherit;
+        text-decoration: none;
+        height: 100%;
+    }
+
+    .home-card-group-link .bi-panel {
+        transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+    }
+
+    .home-card-group-link:hover .bi-panel,
+    .home-card-group-link.active .bi-panel {
+        border-color: rgba(37, 99, 235, 0.38);
+        box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+        transform: translateY(-1px);
     }
 
     .bi-panel-title {
@@ -1674,6 +1770,235 @@ PAGE_CSS = """
         white-space: nowrap;
     }
 
+    .home-card-mini {
+        display: grid;
+        gap: 0.62rem;
+    }
+
+    .home-card-mini-row {
+        display: grid;
+        grid-template-columns: minmax(76px, 0.55fr) minmax(120px, 1fr) minmax(70px, 0.42fr);
+        align-items: center;
+        gap: 0.55rem;
+        font-size: 0.78rem;
+    }
+
+    .home-card-mini-label {
+        color: #3f3f46;
+        font-weight: 680;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .home-card-mini-track {
+        height: 0.56rem;
+        position: relative;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #eef2f3;
+    }
+
+    .home-card-mini-track.benchmark::after {
+        content: "";
+        position: absolute;
+        top: -2px;
+        bottom: -2px;
+        left: var(--benchmark-left, 0%);
+        width: 2px;
+        border-radius: 999px;
+        background: #0f172a;
+        opacity: 0.42;
+    }
+
+    .home-card-mini-fill {
+        display: block;
+        height: 100%;
+        width: var(--fill-width, 0%);
+        border-radius: 999px;
+        background: #2b7de9;
+    }
+
+    .home-card-mini-fill.good { background: #2d9d78; }
+    .home-card-mini-fill.warn { background: #d8912f; }
+    .home-card-mini-fill.risk { background: #d65045; }
+
+    .home-card-mini-value {
+        text-align: right;
+        color: #0f172a;
+        font-weight: 760;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .home-card-note-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.45rem;
+        margin-top: 0.72rem;
+    }
+
+    .home-card-note {
+        border-top: 1px solid var(--border-soft);
+        padding-top: 0.52rem;
+        color: #64748b;
+        font-size: 0.75rem;
+        line-height: 1.35;
+    }
+
+    .home-card-note strong {
+        display: block;
+        color: #18314f;
+        font-size: 0.9rem;
+        margin-top: 0.1rem;
+    }
+
+    .home-card-note strong.good { color: #15803d; }
+    .home-card-note strong.risk { color: #dc2626; }
+
+    .home-rank-dual {
+        display: grid;
+        gap: 0.58rem;
+    }
+
+    .home-rank-two-col {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.9rem;
+        align-items: start;
+    }
+
+    .home-rank-column {
+        min-width: 0;
+        border: 1px solid #edf2f7;
+        border-radius: 10px;
+        background: #fbfdff;
+        padding: 0.72rem;
+    }
+
+    .home-rank-column-title {
+        color: #18314f;
+        font-size: 0.82rem;
+        font-weight: 760;
+        margin-bottom: 0.55rem;
+    }
+
+    .home-rank-table-head {
+        margin: 0.08rem 0.72rem 0.46rem;
+        color: #64748b;
+        font-size: 0.72rem;
+        font-weight: 760;
+    }
+
+    .home-rank-column-head {
+        display: grid;
+        align-items: center;
+        margin-bottom: 0.36rem;
+        color: #64748b;
+        font-size: 0.72rem;
+        font-weight: 760;
+    }
+
+    .home-rank-column-head span:last-child {
+        text-align: right;
+        color: #18314f;
+    }
+
+    .home-rank-dual-row {
+        display: grid;
+        grid-template-columns: minmax(92px, 0.55fr) minmax(140px, 1fr) minmax(76px, 0.36fr);
+        gap: 0.55rem;
+        align-items: center;
+        font-size: 0.76rem;
+    }
+
+    .home-card-group-company-profit-rank .home-rank-dual-row,
+    .home-card-group-company-profit-rank .home-rank-column-head {
+        grid-template-columns: minmax(100px, 0.62fr) minmax(108px, 0.88fr) minmax(68px, 0.4fr) minmax(86px, 0.55fr);
+        gap: 0.48rem;
+    }
+
+    .home-rank-dual-name {
+        color: #3f3f46;
+        font-weight: 680;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .home-rank-dual-bars {
+        display: grid;
+        gap: 0.2rem;
+    }
+
+    .home-rank-dual-track {
+        height: 0.38rem;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #eef2f3;
+    }
+
+    .home-card-group-company-profit-rank .home-rank-dual-track {
+        height: 0.44rem;
+    }
+
+    .home-rank-dual-fill {
+        display: block;
+        height: 100%;
+        width: var(--fill-width, 0%);
+        border-radius: 999px;
+        background: #2b7de9;
+    }
+
+    .home-rank-dual-fill.profit { background: #2d9d78; }
+    .home-rank-dual-fill.loss { background: #d65045; }
+    .home-rank-dual-value {
+        text-align: right;
+        color: #52525b;
+        font-weight: 700;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .home-card-group-company-profit-rank .home-rank-dual-value {
+        display: grid;
+        gap: 0.08rem;
+        line-height: 1.18;
+    }
+
+    .home-rank-dual-value .profit { color: #15803d; }
+    .home-rank-dual-value .loss { color: #dc2626; }
+
+    .home-rank-dual-margin {
+        text-align: right;
+        color: #475569;
+        font-weight: 760;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .home-rank-dual-margin.profit { color: #15803d; }
+    .home-rank-dual-margin.loss { color: #dc2626; }
+
+    .home-anomaly-tags {
+        display: flex;
+        gap: 0.35rem;
+        flex-wrap: wrap;
+        margin-top: 0.72rem;
+    }
+
+    .home-anomaly-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.28rem;
+        border-radius: 999px;
+        padding: 0.22rem 0.5rem;
+        background: #fff4d6;
+        color: #9a5b00;
+        font-size: 0.73rem;
+        font-weight: 760;
+    }
+
     .bi-alert-list {
         display: grid;
         gap: 0.55rem;
@@ -1724,6 +2049,17 @@ PAGE_CSS = """
         .bi-section-grid {
             grid-template-columns: 1fr;
         }
+        .bi-section-grid > .home-card-group-company-profit-rank {
+            grid-column: auto;
+        }
+        .home-rank-two-col {
+            grid-template-columns: 1fr;
+        }
+        .home-card-group-company-profit-rank .home-rank-dual-row,
+        .home-card-group-company-profit-rank .home-rank-column-head {
+            grid-template-columns: minmax(92px, 0.62fr) minmax(108px, 0.88fr) minmax(66px, 0.4fr) minmax(82px, 0.55fr);
+            gap: 0.48rem;
+        }
         .bi-kpi-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
         }
@@ -1734,6 +2070,12 @@ PAGE_CSS = """
         .bi-hero-side,
         .bi-micro {
             grid-template-columns: 1fr;
+        }
+        .home-card-group-company-profit-rank .home-rank-dual-row,
+        .home-card-group-company-profit-rank .home-rank-column-head {
+            grid-template-columns: minmax(78px, 0.62fr) minmax(84px, 0.88fr) minmax(58px, 0.4fr) minmax(76px, 0.55fr);
+            gap: 0.34rem;
+            font-size: 0.72rem;
         }
     }
 
@@ -2071,6 +2413,154 @@ def _panel_html(title: str, subtitle: str, body: str) -> str:
     """
 
 
+HOME_CARD_GROUP_CONFIG: dict[str, dict[str, str]] = {
+    "budget_execution": {
+        "label": "预算执行",
+        "title": "预算执行明细",
+        "subtitle": "复用全面预算总览口径，按经营单位查看收入与利润进度。",
+    },
+    "operating_summary": {
+        "label": "经营汇总",
+        "title": "经营汇总明细",
+        "subtitle": "复用收入成本费用表经营口径，按公司查看收入、成本和利润。",
+    },
+    "expense_analysis": {
+        "label": "费用分析",
+        "title": "费用分析明细",
+        "subtitle": "沿用现有费用分析口径，展示六类重点费用和公司排行；待后续专项复核。",
+    },
+    "funds_safety": {
+        "label": "资金安全",
+        "title": "资金安全明细",
+        "subtitle": "沿用现有资金预警口径，展示单体公司资金构成；待后续专项复核。",
+    },
+    "company_profit_rank": {
+        "label": "公司收入利润排行",
+        "title": "公司收入利润排行明细",
+        "subtitle": "沿用现有 pl_detail 驾驶舱口径，展示公司收入、利润和变化；待后续专项复核。",
+    },
+    "operating_anomaly": {
+        "label": "经营异常",
+        "title": "经营异常明细",
+        "subtitle": "沿用当前暂定同比/环比阈值，展示经营波动异常；待后续专项复核。",
+    },
+    "funds_turnover_risk": {
+        "label": "资金周转风险",
+        "title": "资金周转风险明细",
+        "subtitle": "沿用现有资金预警口径，默认展示资金紧张和资金关注公司；待后续专项复核。",
+    },
+}
+
+HOME_OPERATING_ANOMALY_THRESHOLDS: dict[str, float] = {
+    "收入同比下降": -0.20,
+    "收入环比下降": -0.20,
+    "利润同比下降": -0.30,
+    "利润环比下降": -0.30,
+    "成本费用环比上升": 0.20,
+    "净利率明显下滑": -0.05,
+}
+HOME_CONSOLIDATION_RANK_EXCLUDED_CODES = {"10101", "10102", "10107", "10108", "10118"}
+
+HOME_OPERATING_CARD_GROUPS: list[dict[str, str]] = [
+    {"key": "management", "label": "管理中心", "code": "101"},
+    {"key": "quality", "label": "素质中心", "code": "10101"},
+    {"key": "international", "label": "国际教育", "code": "10102"},
+    {"key": "kindergarten", "label": "幼儿园", "code": "10107"},
+    {"key": "school", "label": "多维学校", "code": "10108"},
+    {"key": "youth", "label": "青少年宫", "code": "10118"},
+    {"key": "eryu", "label": "尔遇书馆", "code": "10204"},
+]
+
+HOME_MANAGEMENT_CENTER_CODE = "101"
+HOME_NON_SUBJECT_CENTER_CODE = "1010101"
+HOME_ERYU_CENTER_CODE = "10204"
+HOME_SONGSHANHU_CODE = "101010138"
+HOME_MAIN_REVENUE_ITEM = "主营业务收入"
+HOME_MANAGEMENT_FEE_ITEM = "管理费服务费"
+
+
+def _home_card_group_href(group_key: str, selected_group_key: str | None = None) -> str:
+    return "?" if group_key == selected_group_key else f"?home_group={quote(str(group_key))}"
+
+
+def _home_card_group_wrap(group_key: str, selected_group_key: str | None, panel_html: str) -> str:
+    active_class = " active" if group_key == selected_group_key else ""
+    group_class = f" home-card-group-{str(group_key).replace('_', '-')}"
+    title = "点击收起" if active_class else "点击查看明细"
+    return (
+        f'<a class="home-card-group-link{group_class}{active_class}" href="{_html(_home_card_group_href(group_key, selected_group_key))}" '
+        f'target="_top" title="{_html(title)}">{panel_html}</a>'
+    )
+
+
+def _home_card_fill_width(value) -> str:
+    return f"{_progress_value(value) * 100:.1f}%"
+
+
+def _home_card_benchmark_left(value) -> str:
+    return f"{_progress_value(value) * 100:.1f}%"
+
+
+def _home_card_status_class(value, benchmark=None) -> str:
+    return _progress_class(value, benchmark)
+
+
+def _home_budget_card_summary(budget: dict) -> dict:
+    overview = budget.get("progress") if isinstance(budget, dict) else None
+    total = _budget_total_row(overview) if isinstance(overview, pd.DataFrame) else {}
+    theory = budget.get("theory_completion") if isinstance(budget, dict) else None
+    if theory is None:
+        theory = total.get("时间进度")
+    return {
+        "income_completion": total.get("收入完成率", budget.get("income_completion") if isinstance(budget, dict) else None),
+        "profit_completion": total.get("利润完成率", budget.get("profit_completion") if isinstance(budget, dict) else None),
+        "theory_completion": theory,
+        "income_gap": total.get("收入进度差"),
+        "profit_gap": total.get("利润进度差"),
+        "status": total.get("状态"),
+        "income_actual": total.get("收入实际", budget.get("income_actual_ytd") if isinstance(budget, dict) else None),
+        "profit_actual": total.get("利润实际", budget.get("profit_actual_ytd") if isinstance(budget, dict) else None),
+    }
+
+
+def _render_budget_execution_panel(budget: dict, selected_group_key: str | None = None) -> str:
+    summary = _home_budget_card_summary(budget or {})
+    theory = summary.get("theory_completion")
+    income_completion = summary.get("income_completion")
+    profit_completion = summary.get("profit_completion")
+    income_gap = summary.get("income_gap")
+    profit_gap = summary.get("profit_gap")
+    profit_text = _fmt_percent(profit_completion)
+    if profit_text == "-" and not _budget_value_missing(profit_gap):
+        profit_text = _fmt_budget_gap(profit_gap)
+    body = f"""
+        <div class="home-card-mini">
+            <div class="home-card-mini-row">
+                <div class="home-card-mini-label">收入完成</div>
+                <div class="home-card-mini-track benchmark" style="--benchmark-left:{_home_card_benchmark_left(theory)}">
+                    <span class="home-card-mini-fill {_home_card_status_class(income_completion, theory)}" style="--fill-width:{_home_card_fill_width(income_completion)}"></span>
+                </div>
+                <div class="home-card-mini-value">{_html(_fmt_percent(income_completion))}</div>
+            </div>
+            <div class="home-card-mini-row">
+                <div class="home-card-mini-label">利润完成</div>
+                <div class="home-card-mini-track benchmark" style="--benchmark-left:{_home_card_benchmark_left(theory)}">
+                    <span class="home-card-mini-fill {_home_card_status_class(profit_completion, theory)}" style="--fill-width:{_home_card_fill_width(profit_completion)}"></span>
+                </div>
+                <div class="home-card-mini-value">{_html(profit_text)}</div>
+            </div>
+        </div>
+        <div class="home-card-note-grid">
+            <div class="home-card-note">时间进度<strong>{_html(_fmt_percent(theory))}</strong></div>
+            <div class="home-card-note">收入偏离<strong>{_html(_fmt_budget_gap(income_gap))}</strong></div>
+            <div class="home-card-note">利润偏离<strong>{_html(_fmt_budget_gap(profit_gap))}</strong></div>
+            <div class="home-card-note">综合状态<strong>{_html(summary.get("status") or "暂无")}</strong></div>
+        </div>
+    """
+    panel = _panel_html("预算执行", "复用全面预算口径；点击查看经营单位进度", body)
+    return _home_card_group_wrap("budget_execution", selected_group_key, panel)
+
+
 def _render_budget_panel(budget: dict) -> str:
     theory = budget.get("theory_completion")
     body = (
@@ -2091,6 +2581,687 @@ def _render_budget_panel(budget: dict) -> str:
     )
     body += f'<div class="bi-panel-subtitle">当前理论进度 {_html(_fmt_percent(theory))}</div>'
     return _panel_html("预算执行", "收入与利润分开看，先抓偏离理论进度的项目", body)
+
+
+def _operating_summary_card_summary(income: dict) -> dict:
+    revenue = _safe_float(income.get("revenue")) if isinstance(income, dict) else 0.0
+    cost_total = _safe_float(income.get("cost_total", income.get("cost_run_rate"))) if isinstance(income, dict) else 0.0
+    net_profit = _safe_float(income.get("net_profit")) if isinstance(income, dict) else 0.0
+    net_margin = _safe_ratio_ui(net_profit, revenue)
+    return {
+        "revenue": revenue,
+        "cost_total": cost_total,
+        "net_profit": net_profit,
+        "net_margin": net_margin,
+    }
+
+
+def _render_operating_summary_panel(income: dict, selected_group_key: str | None = None) -> str:
+    summary = _operating_summary_card_summary(income or {})
+    max_value = max(abs(summary["revenue"]), abs(summary["cost_total"]), abs(summary["net_profit"]), 1.0)
+
+    def row(label: str, value: float, css_class: str = "") -> str:
+        width = min(abs(_safe_float(value)) / max_value, 1.0) * 100
+        sign_class = "negative" if _safe_float(value) < 0 else "positive"
+        fill_class = css_class or sign_class
+        return f"""
+            <div class="home-card-mini-row">
+                <div class="home-card-mini-label">{_html(label)}</div>
+                <div class="home-card-mini-track">
+                    <span class="home-card-mini-fill {fill_class}" style="--fill-width:{width:.1f}%"></span>
+                </div>
+                <div class="home-card-mini-value">{_html(_fmt_money_compact(value))}</div>
+            </div>
+        """
+
+    net_margin = summary["net_margin"]
+    margin_text = _fmt_percent(net_margin)
+    margin_class = "risk" if _safe_float(net_margin) < 0 else "good"
+    body = f"""
+        <div class="home-card-mini">
+            {row("经营收入", summary["revenue"], "good")}
+            {row("成本费用", summary["cost_total"], "warn")}
+            {row("经营净利", summary["net_profit"])}
+        </div>
+        <div class="home-card-note-grid">
+            <div class="home-card-note">净利率<strong class="{margin_class}">{_html(margin_text)}</strong></div>
+            <div class="home-card-note">口径<strong>收入成本费用表</strong></div>
+        </div>
+    """
+    panel = _panel_html("经营汇总", "复用经营汇总收入成本费用口径；点击查看公司明细", body)
+    return _home_card_group_wrap("operating_summary", selected_group_key, panel)
+
+
+@st.cache_data(show_spinner=False, ttl=120)
+def _home_expense_analysis_for_scope(period: str, company_codes: tuple[str, ...]) -> dict:
+    source_df = get_operating_summary_source_detail(period, list(company_codes))
+    return build_focus_expense_analysis(source_df)
+
+
+def _render_expense_analysis_panel(analysis: dict, selected_group_key: str | None = None) -> str:
+    categories = analysis.get("categories") if isinstance(analysis, dict) else pd.DataFrame()
+    management = analysis.get("management_fee", {}) if isinstance(analysis, dict) else {}
+    bridge = analysis.get("expense_bridge", {}) if isinstance(analysis, dict) else {}
+    if not isinstance(categories, pd.DataFrame) or categories.empty:
+        body = '<div class="bi-empty">暂无六类重点费用数据</div>'
+    else:
+        view = categories.copy()
+        view["_amount"] = pd.to_numeric(view.get("本月金额", 0), errors="coerce").fillna(0.0)
+        max_value = max(float(view["_amount"].abs().max()), 1.0)
+        rows: list[str] = []
+        for item in view.to_dict("records"):
+            amount = _safe_float(item.get("本月金额"))
+            width = max(abs(amount) / max_value * 100, 2)
+            rows.append(
+                f"""
+                <div class="home-card-mini-row">
+                    <div class="home-card-mini-label" title="{_html(item.get("费用类别", ""))}">{_html(item.get("费用类别", ""))}</div>
+                    <div class="home-card-mini-track">
+                        <span class="home-card-mini-fill warn" style="--fill-width:{width:.1f}%"></span>
+                    </div>
+                    <div class="home-card-mini-value">{_html(_fmt_money_compact(amount))}</div>
+                </div>
+                """
+            )
+        body = f'<div class="home-card-mini">{"".join(rows)}</div>'
+    body += f"""
+        <div class="home-card-note-grid">
+            <div class="home-card-note">管理费服务费<strong>{_html(_fmt_money_compact(management.get("amount")))}</strong></div>
+            <div class="home-card-note">{_html(bridge.get("label", "其他费用"))}<strong>{_html(_fmt_money_compact(bridge.get("check_difference") if bridge.get("status") == "warning" else bridge.get("other_fee")))}</strong></div>
+            <div class="home-card-note">口径状态<strong>沿用现有口径</strong></div>
+        </div>
+        <div class="home-card-note">{_html(_expense_bridge_sentence(bridge))}</div>
+    """
+    panel = _panel_html("费用分析", "重点关注人工、租金、折旧摊销及波动费用", body)
+    return _home_card_group_wrap("expense_analysis", selected_group_key, panel)
+
+
+def _home_expense_analysis_detail_for_scope(period: str, company_codes: list[str]) -> pd.DataFrame:
+    analysis = _home_expense_analysis_for_scope(period, tuple(company_codes))
+    categories = analysis.get("categories") if isinstance(analysis, dict) else pd.DataFrame()
+    rows: list[dict] = []
+    if isinstance(categories, pd.DataFrame) and not categories.empty:
+        for item in categories.to_dict("records"):
+            rows.append(
+                {
+                    "明细类型": "费用类别",
+                    "费用类别": item.get("费用类别"),
+                    "公司": "-",
+                    "业务板块": "-",
+                    "金额": item.get("本月金额"),
+                    "占成本费用比": item.get("占成本费用比"),
+                    "占收入比": item.get("占收入比"),
+                    "占比": None,
+                    "状态": item.get("状态说明"),
+                }
+            )
+
+    group_lookup = _home_company_business_group_lookup()
+    try:
+        source_df = get_operating_summary_source_detail(period, list(company_codes))
+    except Exception:
+        source_df = pd.DataFrame()
+
+    if isinstance(source_df, pd.DataFrame) and not source_df.empty:
+        source = source_df.copy()
+        for column in ["source_item_name", "company_name", "company_code", "account_code"]:
+            if column not in source.columns:
+                source[column] = ""
+        if "current_amount" not in source.columns:
+            source["current_amount"] = 0.0
+        source["source_item_name"] = source["source_item_name"].astype(str).str.strip()
+        source["current_amount"] = pd.to_numeric(source["current_amount"], errors="coerce").fillna(0.0)
+        detail = source[source.apply(lambda row: _is_income_cost_detail_row(row.to_dict()), axis=1)].copy()
+        for rule in EXPENSE_FOCUS_CATEGORY_RULES:
+            matched = detail[detail["source_item_name"].isin(rule["items"])].copy()
+            if matched.empty:
+                continue
+            total_amount = _safe_float(matched["current_amount"].sum())
+            by_company = (
+                matched.groupby(["company_code", "company_name"], dropna=False)["current_amount"]
+                .sum()
+                .reset_index()
+                .sort_values("current_amount", ascending=False, kind="mergesort")
+                .head(5)
+            )
+            category_status = ""
+            if isinstance(categories, pd.DataFrame) and not categories.empty:
+                matched_status = categories[categories["费用类别"] == rule["category"]]
+                if not matched_status.empty:
+                    category_status = str(matched_status.iloc[0].get("状态说明") or "")
+            for item in by_company.to_dict("records"):
+                company_code = str(item.get("company_code") or "")
+                company_name = str(item.get("company_name") or company_code or "未识别")
+                rows.append(
+                    {
+                        "明细类型": "公司排行",
+                        "费用类别": rule["category"],
+                        "公司": company_name,
+                        "业务板块": group_lookup.get(company_code) or group_lookup.get(company_name) or "-",
+                        "金额": item.get("current_amount"),
+                        "占成本费用比": None,
+                        "占收入比": None,
+                        "占比": _expense_ratio(item.get("current_amount"), total_amount),
+                        "状态": category_status,
+                    }
+                )
+    else:
+        ranking = analysis.get("ranking") if isinstance(analysis, dict) else pd.DataFrame()
+        if isinstance(ranking, pd.DataFrame) and not ranking.empty:
+            for item in ranking.to_dict("records"):
+                company_name = str(item.get("主要经营单位") or "-")
+                rows.append(
+                    {
+                        "明细类型": "公司排行",
+                        "费用类别": item.get("费用类别"),
+                        "公司": company_name,
+                        "业务板块": group_lookup.get(company_name, "-"),
+                        "金额": item.get("本月金额"),
+                        "占成本费用比": None,
+                        "占收入比": None,
+                        "占比": item.get("占比"),
+                        "状态": item.get("判断"),
+                    }
+                )
+    return pd.DataFrame(
+        rows,
+        columns=["明细类型", "费用类别", "公司", "业务板块", "金额", "占成本费用比", "占收入比", "占比", "状态"],
+    )
+
+
+@st.cache_data(show_spinner=False, ttl=120)
+def _home_funds_warning_rows_for_period(period: str) -> pd.DataFrame:
+    companies = _funds_warning_company_frame()
+    balances = _funds_warning_balance_metrics(period)
+    costs = _funds_warning_cost_metrics(period)
+    return _funds_warning_build_rows(companies, balances, costs)
+
+
+def _home_funds_rows_for_scope(period: str, company_codes: tuple[str, ...]) -> pd.DataFrame:
+    rows = _home_funds_warning_rows_for_period(period)
+    if rows is None or rows.empty:
+        return pd.DataFrame()
+    if company_codes and "company_code" in rows.columns:
+        selected = {str(code) for code in company_codes}
+        return rows[rows["company_code"].astype(str).isin(selected)].copy()
+    return rows.copy()
+
+
+def _funds_card_money_sum(rows: pd.DataFrame, column: str) -> float:
+    if rows is None or rows.empty or column not in rows.columns:
+        return 0.0
+    return _safe_float(pd.to_numeric(rows[column], errors="coerce").fillna(0.0).sum())
+
+
+def _render_funds_safety_panel(rows: pd.DataFrame, selected_group_key: str | None = None) -> str:
+    rows = rows if isinstance(rows, pd.DataFrame) else pd.DataFrame()
+    cash = _funds_card_money_sum(rows, "货币资金")
+    receivable = _funds_card_money_sum(rows, "其他应收款")
+    payable = _funds_card_money_sum(rows, "其他应付款")
+    available = _funds_card_money_sum(rows, "可使用周转资金")
+    group_ratio = _funds_warning_group_turnover_ratio(rows)
+    components = [
+        ("货币资金", cash, "good"),
+        ("其他应收", receivable, "good"),
+        ("其他应付", payable, "risk"),
+        ("可用周转金", available, "warn" if available < 0 else "good"),
+    ]
+    max_value = max((abs(value) for _, value, _ in components), default=1.0)
+    max_value = max(max_value, 1.0)
+    body_rows = []
+    for label, value, tone in components:
+        width = max(abs(value) / max_value * 100, 2)
+        body_rows.append(
+            f"""
+            <div class="home-card-mini-row">
+                <div class="home-card-mini-label">{_html(label)}</div>
+                <div class="home-card-mini-track">
+                    <span class="home-card-mini-fill {tone}" style="--fill-width:{width:.1f}%"></span>
+                </div>
+                <div class="home-card-mini-value">{_html(_fmt_money_compact(value))}</div>
+            </div>
+            """
+        )
+    body = f"""
+        <div class="home-card-mini">{"".join(body_rows)}</div>
+        <div class="home-card-note-grid">
+            <div class="home-card-note">集团资金周转系数<strong>{_html(_funds_warning_ratio_text(group_ratio))}</strong></div>
+            <div class="home-card-note">口径状态<strong>沿用现有口径</strong></div>
+        </div>
+    """
+    panel = _panel_html("资金安全", "资金构成与集团周转系数；点击查看单体公司", body)
+    return _home_card_group_wrap("funds_safety", selected_group_key, panel)
+
+
+def _funds_risk_rows(rows: pd.DataFrame) -> pd.DataFrame:
+    if rows is None or rows.empty:
+        return pd.DataFrame()
+    risk_rows = rows[rows["资金状态"].isin(["资金紧张", "资金关注"])].copy()
+    return _funds_warning_sort_rows(risk_rows, "按风险从高到低")
+
+
+def _render_funds_turnover_risk_panel(rows: pd.DataFrame, selected_group_key: str | None = None) -> str:
+    rows = rows if isinstance(rows, pd.DataFrame) else pd.DataFrame()
+    tight_count = int((rows.get("资金状态", pd.Series(dtype=str)) == "资金紧张").sum()) if not rows.empty else 0
+    watch_count = int((rows.get("资金状态", pd.Series(dtype=str)) == "资金关注").sum()) if not rows.empty else 0
+    safe_count = int((rows.get("资金状态", pd.Series(dtype=str)) == "资金安全").sum()) if not rows.empty else 0
+    risk_rows = _funds_risk_rows(rows).head(5)
+    if risk_rows.empty:
+        risk_html = '<div class="bi-empty">当前范围暂无资金紧张或关注公司</div>'
+    else:
+        risk_html = ""
+        for item in risk_rows.to_dict("records"):
+            ratio = item.get("资金周转系数")
+            try:
+                ratio_value = float(ratio)
+            except (TypeError, ValueError):
+                ratio_value = 0.0
+            width = min(max((3.0 - ratio_value) / 3.0 * 100, 8), 100)
+            tone = "risk" if item.get("资金状态") == "资金紧张" else "warn"
+            risk_html += f"""
+                <div class="home-card-mini-row">
+                    <div class="home-card-mini-label" title="{_html(item.get("公司/校区", ""))}">{_html(item.get("公司/校区", ""))}</div>
+                    <div class="home-card-mini-track">
+                        <span class="home-card-mini-fill {tone}" style="--fill-width:{width:.1f}%"></span>
+                    </div>
+                    <div class="home-card-mini-value">{_html(_funds_warning_ratio_text(item.get("资金周转系数")))}</div>
+                </div>
+            """
+    body = f"""
+        <div class="home-card-note-grid">
+            <div class="home-card-note">资金紧张<strong class="risk">{tight_count}</strong></div>
+            <div class="home-card-note">资金关注<strong>{watch_count}</strong></div>
+            <div class="home-card-note">资金安全<strong class="good">{safe_count}</strong></div>
+            <div class="home-card-note">口径状态<strong>沿用现有口径</strong></div>
+        </div>
+        <div class="home-card-mini" style="margin-top:.72rem;">{risk_html}</div>
+    """
+    panel = _panel_html("资金周转风险", "紧张和关注公司优先展示；点击查看预警清单", body)
+    return _home_card_group_wrap("funds_turnover_risk", selected_group_key, panel)
+
+
+@st.cache_data(show_spinner=False, ttl=120)
+def _home_company_operating_metrics_for_scope(period: str, company_codes: tuple[str, ...]) -> pd.DataFrame:
+    source_rows = _query_operating_card_source_rows(period, list(company_codes))
+    metrics = _operating_card_company_metrics_from_source(source_rows)
+    columns = ["company_code", "公司", "业务板块", "收入", "成本费用合计", "净利润", "净利率"]
+    if metrics is None or metrics.empty:
+        return pd.DataFrame(columns=columns)
+    result = metrics.copy()
+    result["company_code"] = result["company_code"].astype(str)
+    result = result[~result["company_code"].isin(HOME_CONSOLIDATION_RANK_EXCLUDED_CODES)].copy()
+    group_lookup = _home_company_business_group_lookup()
+    result["业务板块"] = result.apply(
+        lambda row: group_lookup.get(str(row.get("company_code") or ""))
+        or group_lookup.get(str(row.get("公司") or ""))
+        or "未分组",
+        axis=1,
+    )
+    return result[columns].sort_values(["收入", "company_code"], ascending=[False, True])
+
+
+def _home_company_operating_comparison_frame(period: str, company_codes: tuple[str, ...]) -> pd.DataFrame:
+    periods = get_dashboard_periods()
+    prev_period = _previous_period(periods, period)
+    last_year_period = _period_same_month_last_year(period)
+    current = _home_company_operating_metrics_for_scope(period, company_codes)
+    columns = [
+        "company_code",
+        "公司",
+        "业务板块",
+        "本月收入",
+        "上月收入",
+        "去年同期收入",
+        "收入环比",
+        "收入同比",
+        "本月净利润",
+        "上月净利润",
+        "去年同期净利润",
+        "利润环比",
+        "利润同比",
+        "本月成本费用",
+        "上月成本费用",
+        "成本费用环比",
+        "本月净利率",
+        "上月净利率",
+        "净利率变化",
+        "收入排名",
+        "利润排名",
+        "收入占比",
+        "利润贡献",
+    ]
+    if current is None or current.empty:
+        return pd.DataFrame(columns=columns)
+    base = current.rename(
+        columns={
+            "收入": "本月收入",
+            "净利润": "本月净利润",
+            "成本费用合计": "本月成本费用",
+            "净利率": "本月净利率",
+        }
+    )
+
+    def historical(period_value: str | None, prefix: str) -> pd.DataFrame:
+        if not period_value:
+            return pd.DataFrame(columns=["company_code", f"{prefix}收入", f"{prefix}净利润", f"{prefix}成本费用", f"{prefix}净利率"])
+        frame = _home_company_operating_metrics_for_scope(period_value, company_codes)
+        if frame is None or frame.empty:
+            return pd.DataFrame(columns=["company_code", f"{prefix}收入", f"{prefix}净利润", f"{prefix}成本费用", f"{prefix}净利率"])
+        return frame.rename(
+            columns={
+                "收入": f"{prefix}收入",
+                "净利润": f"{prefix}净利润",
+                "成本费用合计": f"{prefix}成本费用",
+                "净利率": f"{prefix}净利率",
+            }
+        )[["company_code", f"{prefix}收入", f"{prefix}净利润", f"{prefix}成本费用", f"{prefix}净利率"]]
+
+    merged = base.merge(historical(prev_period, "上月"), on="company_code", how="left")
+    last_year = historical(last_year_period, "去年同期").rename(
+        columns={
+            "去年同期成本费用": "去年同期成本费用",
+            "去年同期净利率": "去年同期净利率",
+        }
+    )
+    merged = merged.merge(last_year[["company_code", "去年同期收入", "去年同期净利润"]], on="company_code", how="left")
+    merged["收入环比"] = merged.apply(lambda row: _relative_change_value(row.get("本月收入"), row.get("上月收入")), axis=1)
+    merged["收入同比"] = merged.apply(lambda row: _relative_change_value(row.get("本月收入"), row.get("去年同期收入")), axis=1)
+    merged["利润环比"] = merged.apply(lambda row: _relative_change_value(row.get("本月净利润"), row.get("上月净利润")), axis=1)
+    merged["利润同比"] = merged.apply(lambda row: _relative_change_value(row.get("本月净利润"), row.get("去年同期净利润")), axis=1)
+    merged["成本费用环比"] = merged.apply(lambda row: _relative_change_value(row.get("本月成本费用"), row.get("上月成本费用")), axis=1)
+    merged["净利率变化"] = merged.apply(
+        lambda row: None
+        if pd.isna(row.get("本月净利率")) or pd.isna(row.get("上月净利率"))
+        else _safe_float(row.get("本月净利率")) - _safe_float(row.get("上月净利率")),
+        axis=1,
+    )
+    merged["收入排名"] = merged["本月收入"].rank(method="min", ascending=False)
+    merged["利润排名"] = merged["本月净利润"].rank(method="min", ascending=False)
+    total_revenue = _safe_float(pd.to_numeric(merged["本月收入"], errors="coerce").fillna(0.0).sum())
+    total_abs_profit = max(_safe_float(pd.to_numeric(merged["本月净利润"], errors="coerce").fillna(0.0).abs().sum()), 1.0)
+    merged["收入占比"] = merged["本月收入"].apply(lambda value: _safe_ratio_ui(value, total_revenue))
+    merged["利润贡献"] = merged["本月净利润"].apply(lambda value: abs(_safe_float(value)) / total_abs_profit)
+    return merged[columns]
+
+
+@st.cache_data(show_spinner=False, ttl=120)
+def _home_company_rank_detail_for_scope(period: str, company_codes: tuple[str, ...]) -> pd.DataFrame:
+    detail = _home_company_operating_comparison_frame(period, company_codes)
+    columns = [
+        "公司",
+        "业务板块",
+        "经营收入",
+        "收入排名",
+        "经营净利润",
+        "利润排名",
+        "净利率",
+        "收入占比",
+        "利润贡献",
+        "收入环比",
+        "收入同比",
+        "利润环比",
+        "利润同比",
+    ]
+    if detail is None or detail.empty:
+        return pd.DataFrame(columns=columns)
+    result = detail.rename(
+        columns={
+            "本月收入": "经营收入",
+            "本月净利润": "经营净利润",
+            "本月净利率": "净利率",
+        }
+    )
+    return result[columns].sort_values(["经营收入", "公司"], ascending=[False, True])
+
+
+@st.cache_data(show_spinner=False, ttl=120)
+def _home_company_rank_summary_for_scope(period: str, company_codes: tuple[str, ...]) -> pd.DataFrame:
+    metrics = _home_company_operating_metrics_for_scope(period, company_codes)
+    columns = ["公司", "业务板块", "经营收入", "经营净利润", "净利率"]
+    if metrics is None or metrics.empty:
+        return pd.DataFrame(columns=columns)
+    result = metrics.rename(
+        columns={
+            "收入": "经营收入",
+            "净利润": "经营净利润",
+        }
+    )
+    return result[columns].sort_values(["经营净利润", "公司"], ascending=[False, True])
+
+
+def _home_company_rank_panel_slices(detail: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if detail is None or detail.empty:
+        empty = pd.DataFrame(columns=["公司", "业务板块", "经营收入", "经营净利润", "净利率"])
+        return empty, empty
+    view = detail.copy()
+    view["_profit_sort"] = pd.to_numeric(view.get("经营净利润"), errors="coerce")
+    profitable = (
+        view[view["_profit_sort"] > 0]
+        .sort_values(["_profit_sort", "公司"], ascending=[False, True], na_position="last")
+        .head(5)
+        .drop(columns=["_profit_sort"], errors="ignore")
+    )
+    bottom = (
+        view.sort_values(["_profit_sort", "公司"], ascending=[True, True], na_position="last")
+        .head(5)
+        .drop(columns=["_profit_sort"], errors="ignore")
+    )
+    return profitable, bottom
+
+
+def _home_rank_dual_rows_html(rows_df: pd.DataFrame, max_value: float, empty_text: str) -> str:
+    if rows_df is None or rows_df.empty:
+        return f'<div class="bi-empty">{_html(empty_text)}</div>'
+    rows: list[str] = []
+    for item in rows_df.to_dict("records"):
+        revenue = _safe_float(item.get("经营收入"))
+        profit = _safe_float(item.get("经营净利润"))
+        margin_value = item.get("净利率")
+        margin_text = _fmt_percent(margin_value)
+        margin_display = "暂无" if margin_text == "-" else margin_text
+        margin_class = "loss" if _safe_float(margin_value) < 0 else "profit" if margin_text != "-" else ""
+        revenue_width = max(abs(revenue) / max_value * 100, 2)
+        profit_width = max(abs(profit) / max_value * 100, 2)
+        profit_class = "loss" if profit < 0 else "profit"
+        company_name = _html(item.get("公司", ""))
+        rows.append(
+            f"""
+            <div class="home-rank-dual-row">
+                <div class="home-rank-dual-name" title="{company_name}">{company_name}</div>
+                <div class="home-rank-dual-bars">
+                    <div class="home-rank-dual-track" title="经营收入 {_html(_fmt_money_compact(revenue))}">
+                        <span class="home-rank-dual-fill" style="--fill-width:{revenue_width:.1f}%"></span>
+                    </div>
+                    <div class="home-rank-dual-track" title="经营净利润 {_html(_fmt_money_compact(profit))}">
+                        <span class="home-rank-dual-fill {profit_class}" style="--fill-width:{profit_width:.1f}%"></span>
+                    </div>
+                </div>
+                <div class="home-rank-dual-value">
+                    <span title="经营收入 {_html(_fmt_money_compact(revenue))}">收 {_html(_fmt_money_compact(revenue))}</span>
+                    <span class="{profit_class}" title="经营净利润 {_html(_fmt_money_compact(profit))}">利 {_html(_fmt_money_compact(profit))}</span>
+                </div>
+                <div class="home-rank-dual-margin {margin_class}" title="{_html(margin_display)}">{_html(margin_display)}</div>
+            </div>
+            """
+        )
+    return "".join(rows)
+
+
+def _render_company_profit_rank_panel(detail: pd.DataFrame, selected_group_key: str | None = None) -> str:
+    if detail is None or detail.empty:
+        body = '<div class="bi-empty">暂无公司收入利润排行数据</div>'
+    else:
+        profit_top, profit_bottom = _home_company_rank_panel_slices(detail)
+        view = pd.concat([profit_top, profit_bottom], ignore_index=True)
+        max_value = max(
+            _safe_float(pd.to_numeric(view.get("经营收入", 0), errors="coerce").fillna(0.0).abs().max()),
+            _safe_float(pd.to_numeric(view.get("经营净利润", 0), errors="coerce").fillna(0.0).abs().max()),
+            1.0,
+        )
+        body = f"""
+            <div class="home-rank-table-head">公司 / 收入利润 / 金额</div>
+            <div class="home-rank-two-col">
+                <div class="home-rank-column">
+                    <div class="home-rank-column-title">盈利前五</div>
+                    <div class="home-rank-column-head"><span></span><span></span><span></span><span>净利率</span></div>
+                    <div class="home-rank-dual">{_home_rank_dual_rows_html(profit_top, max_value, "暂无盈利公司")}</div>
+                </div>
+                <div class="home-rank-column">
+                    <div class="home-rank-column-title">利润倒数前五</div>
+                    <div class="home-rank-column-head"><span></span><span></span><span></span><span>净利率</span></div>
+                    <div class="home-rank-dual">{_home_rank_dual_rows_html(profit_bottom, max_value, "暂无公司数据")}</div>
+                </div>
+            </div>
+        """
+    body += """
+        <div class="home-card-note-grid">
+            <div class="home-card-note">图形说明<strong>蓝=收入 绿/红=利润</strong></div>
+            <div class="home-card-note">口径状态<strong>沿用现有口径</strong></div>
+        </div>
+    """
+    panel = _panel_html("公司收入利润排行", "同时观察收入规模与利润贡献", body)
+    return _home_card_group_wrap("company_profit_rank", selected_group_key, panel)
+
+
+def _home_anomaly_row_from_comparison(row: pd.Series) -> dict | None:
+    checks = [
+        ("收入同比下降", row.get("收入同比"), lambda value: value < HOME_OPERATING_ANOMALY_THRESHOLDS["收入同比下降"]),
+        ("收入环比下降", row.get("收入环比"), lambda value: value < HOME_OPERATING_ANOMALY_THRESHOLDS["收入环比下降"]),
+        ("利润同比下降", row.get("利润同比"), lambda value: value < HOME_OPERATING_ANOMALY_THRESHOLDS["利润同比下降"]),
+        ("利润环比下降", row.get("利润环比"), lambda value: value < HOME_OPERATING_ANOMALY_THRESHOLDS["利润环比下降"]),
+        ("成本费用环比上升", row.get("成本费用环比"), lambda value: value > HOME_OPERATING_ANOMALY_THRESHOLDS["成本费用环比上升"]),
+        ("净利率明显下滑", row.get("净利率变化"), lambda value: value < HOME_OPERATING_ANOMALY_THRESHOLDS["净利率明显下滑"]),
+    ]
+    labels: list[str] = []
+    degrees: list[float] = []
+    for label, value, predicate in checks:
+        if value is None or pd.isna(value):
+            continue
+        numeric = _safe_float(value)
+        if predicate(numeric):
+            labels.append(label)
+            degrees.append(abs(numeric))
+    if not labels:
+        return None
+    degree = max(degrees) if degrees else 0.0
+    return {
+        "公司": row.get("公司"),
+        "业务板块": row.get("业务板块"),
+        "本月收入": row.get("本月收入"),
+        "上月收入": row.get("上月收入"),
+        "去年同期收入": row.get("去年同期收入"),
+        "收入环比": row.get("收入环比"),
+        "收入同比": row.get("收入同比"),
+        "本月净利润": row.get("本月净利润"),
+        "上月净利润": row.get("上月净利润"),
+        "去年同期净利润": row.get("去年同期净利润"),
+        "利润环比": row.get("利润环比"),
+        "利润同比": row.get("利润同比"),
+        "本月成本费用": row.get("本月成本费用"),
+        "上月成本费用": row.get("上月成本费用"),
+        "成本费用环比": row.get("成本费用环比"),
+        "本月净利率": row.get("本月净利率"),
+        "上月净利率": row.get("上月净利率"),
+        "净利率变化": row.get("净利率变化"),
+        "异常类型": "、".join(labels),
+        "异常程度": degree,
+        "异常程度/状态": "需关注",
+    }
+
+
+@st.cache_data(show_spinner=False, ttl=120)
+def _home_operating_anomaly_detail_for_scope(period: str, company_codes: tuple[str, ...]) -> pd.DataFrame:
+    comparison = _home_company_operating_comparison_frame(period, company_codes)
+    columns = [
+        "公司",
+        "业务板块",
+        "本月收入",
+        "上月收入",
+        "去年同期收入",
+        "收入环比",
+        "收入同比",
+        "本月净利润",
+        "上月净利润",
+        "去年同期净利润",
+        "利润环比",
+        "利润同比",
+        "本月成本费用",
+        "上月成本费用",
+        "成本费用环比",
+        "本月净利率",
+        "上月净利率",
+        "净利率变化",
+        "异常类型",
+        "异常程度",
+        "异常程度/状态",
+    ]
+    if comparison is None or comparison.empty:
+        return pd.DataFrame(columns=columns)
+    rows = [
+        anomaly
+        for _, row in comparison.iterrows()
+        if (anomaly := _home_anomaly_row_from_comparison(row)) is not None
+    ]
+    if not rows:
+        return pd.DataFrame(columns=columns)
+    return pd.DataFrame(rows, columns=columns).sort_values(["异常程度", "公司"], ascending=[False, True])
+
+
+def _home_operating_anomaly_counts(detail: pd.DataFrame) -> dict[str, int]:
+    counts = {label: 0 for label in HOME_OPERATING_ANOMALY_THRESHOLDS}
+    if detail is None or detail.empty or "异常类型" not in detail.columns:
+        return counts
+    labels = detail["异常类型"].fillna("").astype(str)
+    for label in counts:
+        counts[label] = int(labels.str.contains(label, regex=False).sum())
+    return counts
+
+
+@st.cache_data(show_spinner=False, ttl=120)
+def _home_operating_anomaly_summary_counts_for_scope(period: str, company_codes: tuple[str, ...]) -> dict[str, int]:
+    comparison = _home_company_operating_comparison_frame(period, company_codes)
+    counts = {label: 0 for label in HOME_OPERATING_ANOMALY_THRESHOLDS}
+    if comparison is None or comparison.empty:
+        return counts
+    for _, row in comparison.iterrows():
+        anomaly = _home_anomaly_row_from_comparison(row)
+        if anomaly is None:
+            continue
+        labels = str(anomaly.get("异常类型") or "")
+        for label in counts:
+            if label in labels:
+                counts[label] += 1
+    return counts
+
+
+def _render_operating_anomaly_panel(detail: pd.DataFrame | dict[str, int], selected_group_key: str | None = None) -> str:
+    counts = detail if isinstance(detail, dict) else _home_operating_anomaly_counts(detail)
+    max_count = max(counts.values(), default=0) or 1
+    rows = []
+    for label, count in counts.items():
+        width = max(count / max_count * 100, 2) if count else 0
+        rows.append(
+            f"""
+            <div class="home-card-mini-row">
+                <div class="home-card-mini-label" title="{_html(label)}">{_html(label)}</div>
+                <div class="home-card-mini-track">
+                    <span class="home-card-mini-fill risk" style="--fill-width:{width:.1f}%"></span>
+                </div>
+                <div class="home-card-mini-value">{count}</div>
+            </div>
+            """
+        )
+    tag_html = "".join(f'<span class="home-anomaly-tag">{_html(label)} {count}</span>' for label, count in counts.items() if count)
+    body = f"""
+        <div class="home-card-mini">{"".join(rows)}</div>
+        <div class="home-anomaly-tags">{tag_html or '<span class="home-anomaly-tag">当前范围暂无经营波动异常</span>'}</div>
+        <div class="home-card-note-grid">
+            <div class="home-card-note">异常范围<strong>同比/环比经营波动</strong></div>
+            <div class="home-card-note">口径状态<strong>沿用现有阈值</strong></div>
+        </div>
+    """
+    panel = _panel_html("经营异常", "同比/环比经营波动，不含导入和数据质量异常", body)
+    return _home_card_group_wrap("operating_anomaly", selected_group_key, panel)
 
 
 def _render_funds_panel(balance: dict, income: dict) -> str:
@@ -3116,6 +4287,583 @@ def _query_pl_metric_by_company(
     return pivot.rename(columns={PL_REVENUE_ITEM: "收入", PL_NET_PROFIT_ITEM: "净利润"})
 
 
+def _query_operating_card_group_by_company(
+    period: str,
+    company_codes: list[str],
+    detail_group_key: str | None = None,
+) -> pd.DataFrame:
+    source_rows = _query_operating_card_source_rows(period, company_codes)
+    company_metrics = _operating_card_company_metrics_from_source(source_rows)
+    if detail_group_key:
+        return _operating_card_group_company_detail(company_metrics, company_codes, detail_group_key)
+    adjustments = _operating_card_internal_fee_split(source_rows, company_metrics, company_codes)
+    return _operating_card_group_summary(company_metrics, company_codes, adjustments)
+
+
+@st.cache_data(show_spinner=False, ttl=120)
+def _home_operating_summary_for_scope(period: str, company_codes: tuple[str, ...]) -> dict:
+    group_df = _query_operating_card_group_by_company(period, list(company_codes))
+    if group_df.empty:
+        return {"revenue": 0.0, "cost_total": 0.0, "net_profit": 0.0, "net_margin": None}
+    total_df = group_df[group_df["模块组/公司"].astype(str) == "合计"]
+    total = total_df.iloc[0] if not total_df.empty else group_df.iloc[-1]
+    revenue = _safe_float(total.get("经营收入"))
+    cost_total = _safe_float(total.get("成本费用合计"))
+    net_profit = _safe_float(total.get("经营净利润"))
+    return {
+        "revenue": revenue,
+        "cost_total": cost_total,
+        "net_profit": net_profit,
+        "net_margin": _safe_ratio_ui(net_profit, revenue),
+    }
+
+
+def _query_operating_card_company_metrics(
+    period: str,
+    company_codes: list[str],
+) -> pd.DataFrame:
+    source_rows = _query_operating_card_source_rows(period, company_codes)
+    return _operating_card_company_metrics_from_source(source_rows)
+
+
+def _query_operating_card_fee_reconciliation(period: str, company_codes: list[str]) -> pd.DataFrame:
+    source_rows = _query_operating_card_source_rows(period, company_codes)
+    metrics = _operating_card_company_metrics_from_source(source_rows)
+    split = _operating_card_internal_fee_split(source_rows, metrics, company_codes)
+    reconciliation = split.get("reconciliation")
+    if isinstance(reconciliation, pd.DataFrame):
+        return reconciliation
+    return pd.DataFrame(
+        columns=[
+            "company_code",
+            "公司",
+            "主营业务收入",
+            "实表管理费服务费",
+            "理论非学科服务费",
+            "理论10204服务费",
+            "推定101管理中心收费",
+            "未匹配10204服务费",
+            "差额",
+        ]
+    )
+
+
+def _query_operating_card_source_rows(period: str, company_codes: list[str]) -> pd.DataFrame:
+    params = {"period": period}
+    company_sql = _company_filter_clause("d", company_codes, params, "card_operating")
+    return execute_sql(
+        f"""
+        SELECT
+            d.id,
+            d.company_code AS 公司编码,
+            d.company_code AS company_code,
+            d.item_code,
+            d.item_name,
+            d.amount,
+            COALESCE(NULLIF(TRIM(c.name), ''), d.company_code) AS 公司
+        FROM pl_detail d
+        LEFT JOIN companies c ON d.company_code = c.code
+        WHERE d.period = :period
+          AND d.item_name IN (:revenue_item, :profit_item, :cost_item, :main_revenue_item, :management_fee_item)
+          {company_sql}
+        """,
+        {
+            **params,
+            "revenue_item": PL_REVENUE_ITEM,
+            "profit_item": PL_NET_PROFIT_ITEM,
+            "cost_item": PL_COST_TOTAL_ITEM,
+            "main_revenue_item": HOME_MAIN_REVENUE_ITEM,
+            "management_fee_item": HOME_MANAGEMENT_FEE_ITEM,
+        },
+    )
+
+
+def _operating_card_company_metrics_from_source(rows: pd.DataFrame) -> pd.DataFrame:
+    columns = ["company_code", "公司", "收入", "成本费用合计", "净利润", "净利率"]
+    if rows is None or rows.empty:
+        return pd.DataFrame(columns=columns)
+    target_rows = rows[rows["item_name"].astype(str).isin({PL_REVENUE_ITEM, PL_NET_PROFIT_ITEM, PL_COST_TOTAL_ITEM})].copy()
+    preferred = preferred_pl_detail_rows(target_rows)
+    if preferred.empty:
+        return pd.DataFrame(columns=columns)
+    preferred["_amount"] = pd.to_numeric(preferred.get("amount"), errors="coerce").fillna(0.0)
+    pivot = (
+        preferred.pivot_table(
+            index=["company_code", "公司"],
+            columns="item_name",
+            values="_amount",
+            aggfunc="sum",
+            fill_value=0.0,
+        )
+        .reset_index()
+        .rename_axis(None, axis=1)
+    )
+    for column in (PL_REVENUE_ITEM, PL_NET_PROFIT_ITEM, PL_COST_TOTAL_ITEM):
+        if column not in pivot.columns:
+            pivot[column] = 0.0
+    result = pivot.rename(
+        columns={
+            PL_REVENUE_ITEM: "收入",
+            PL_COST_TOTAL_ITEM: "成本费用合计",
+            PL_NET_PROFIT_ITEM: "净利润",
+        }
+    )
+    result["净利率"] = result.apply(lambda row: _safe_ratio_ui(row["净利润"], row["收入"]), axis=1)
+    return result[columns].sort_values("收入", ascending=False)
+
+
+def _operating_card_main_revenue_map(source_rows: pd.DataFrame) -> dict[str, float]:
+    if source_rows is None or source_rows.empty:
+        return {}
+    main_rows = source_rows[source_rows["item_name"].astype(str).str.strip() == HOME_MAIN_REVENUE_ITEM].copy()
+    if main_rows.empty:
+        return {}
+    main_rows["_amount"] = pd.to_numeric(main_rows.get("amount"), errors="coerce").fillna(0.0)
+    return {
+        str(code): _safe_float(amount)
+        for code, amount in main_rows.groupby(main_rows["company_code"].astype(str))["_amount"].sum().to_dict().items()
+    }
+
+
+def _operating_card_management_fee_map(source_rows: pd.DataFrame) -> dict[str, float]:
+    if source_rows is None or source_rows.empty:
+        return {}
+    fee_rows = source_rows[source_rows["item_name"].astype(str).str.strip() == HOME_MANAGEMENT_FEE_ITEM].copy()
+    if fee_rows.empty:
+        return {}
+    fee_rows["_amount"] = pd.to_numeric(fee_rows.get("amount"), errors="coerce").fillna(0.0)
+    return {
+        str(code): _safe_float(amount)
+        for code, amount in fee_rows.groupby(fee_rows["company_code"].astype(str))["_amount"].sum().to_dict().items()
+    }
+
+
+def _operating_card_quality_participant_codes(company_codes: list[str], main_revenue: dict[str, float]) -> list[str]:
+    scope_set = {str(code) for code in company_codes if str(code)}
+    quality_codes = set(get_consolidation_company_codes("10101"))
+    excluded = {HOME_NON_SUBJECT_CENTER_CODE, HOME_SONGSHANHU_CODE}
+    return [
+        code
+        for code in sorted(scope_set & quality_codes)
+        if code not in excluded and abs(_safe_float(main_revenue.get(code))) > 1e-9
+    ]
+
+
+def _operating_card_non_subject_allocation(
+    center_cost: float,
+    participant_codes: list[str],
+    main_revenue: dict[str, float],
+) -> dict[str, float]:
+    denominator = sum(_safe_float(main_revenue.get(code)) for code in participant_codes)
+    if abs(denominator) <= 1e-9 or abs(center_cost) <= 1e-9:
+        return {code: 0.0 for code in participant_codes}
+    return {
+        code: _safe_float(center_cost) * _safe_float(main_revenue.get(code)) / denominator
+        for code in participant_codes
+    }
+
+
+def _operating_card_proportional_match(amounts: dict[str, float], receiver_income: float) -> tuple[dict[str, float], dict[str, float]]:
+    positive_total = sum(max(_safe_float(amount), 0.0) for amount in amounts.values())
+    receiver_income = max(_safe_float(receiver_income), 0.0)
+    if positive_total <= 1e-9 or receiver_income <= 1e-9:
+        return {code: 0.0 for code in amounts}, {code: _safe_float(amount) for code, amount in amounts.items()}
+    ratio = min(receiver_income / positive_total, 1.0)
+    matched = {code: _safe_float(amount) * ratio for code, amount in amounts.items()}
+    unmatched = {code: _safe_float(amounts.get(code)) - _safe_float(matched.get(code)) for code in amounts}
+    return matched, unmatched
+
+
+def _operating_card_eryu_internal_fee_split(
+    company_codes: list[str],
+    actual_fee: dict[str, float],
+    main_revenue: dict[str, float],
+) -> tuple[dict[str, float], dict[str, float]]:
+    scope_set = {str(code) for code in company_codes if str(code)}
+    if HOME_ERYU_CENTER_CODE not in scope_set:
+        payers = {
+            code: _safe_float(amount)
+            for code, amount in actual_fee.items()
+            if code in (set(get_consolidation_company_codes(HOME_ERYU_CENTER_CODE)) - {HOME_ERYU_CENTER_CODE}) & scope_set
+        }
+        return {code: 0.0 for code in payers}, payers
+    eryu_codes = set(get_consolidation_company_codes(HOME_ERYU_CENTER_CODE))
+    payer_amounts = {
+        code: _safe_float(amount)
+        for code, amount in actual_fee.items()
+        if code in scope_set and code in eryu_codes and code != HOME_ERYU_CENTER_CODE and abs(_safe_float(amount)) > 1e-9
+    }
+    return _operating_card_proportional_match(payer_amounts, _safe_float(main_revenue.get(HOME_ERYU_CENTER_CODE)))
+
+
+def _operating_card_internal_fee_split(
+    source_rows: pd.DataFrame,
+    metrics: pd.DataFrame,
+    company_codes: list[str],
+    *,
+    assign_residual_to_management: bool = True,
+) -> dict:
+    scope_set = {str(code) for code in company_codes if str(code)}
+    main_revenue = _operating_card_main_revenue_map(source_rows)
+    actual_fee = _operating_card_management_fee_map(source_rows)
+    center_rows = metrics[metrics["company_code"].astype(str) == HOME_NON_SUBJECT_CENTER_CODE] if metrics is not None and not metrics.empty else pd.DataFrame()
+    center_cost = _safe_float(center_rows["成本费用合计"].iloc[0]) if len(center_rows) else 0.0
+    participant_codes = _operating_card_quality_participant_codes(company_codes, main_revenue)
+    non_subject_fee = _operating_card_non_subject_allocation(center_cost, participant_codes, main_revenue)
+    eryu_fee, unmatched_eryu_fee = _operating_card_eryu_internal_fee_split(company_codes, actual_fee, main_revenue)
+    non_subject_unmatched_fee: dict[str, float] = {}
+    if not assign_residual_to_management:
+        for code in participant_codes:
+            residual = (
+                _safe_float(actual_fee.get(code))
+                - _safe_float(non_subject_fee.get(code))
+            )
+            if residual > 1e-9:
+                non_subject_unmatched_fee[code] = residual
+    payer_codes = sorted(
+        (set(actual_fee) | set(non_subject_fee) | set(non_subject_unmatched_fee) | set(eryu_fee) | set(unmatched_eryu_fee))
+        & scope_set
+    )
+    management_fee = {
+        code: _safe_float(actual_fee.get(code))
+        - _safe_float(non_subject_fee.get(code))
+        - _safe_float(non_subject_unmatched_fee.get(code))
+        - _safe_float(eryu_fee.get(code))
+        - _safe_float(unmatched_eryu_fee.get(code))
+        for code in payer_codes
+    }
+    reconciliation = []
+    name_map = _operating_card_company_name_map(payer_codes)
+    for code in payer_codes:
+        actual = _safe_float(actual_fee.get(code))
+        non_subject = _safe_float(non_subject_fee.get(code))
+        non_subject_unmatched = _safe_float(non_subject_unmatched_fee.get(code))
+        eryu = _safe_float(eryu_fee.get(code))
+        unmatched_eryu = _safe_float(unmatched_eryu_fee.get(code))
+        management = _safe_float(management_fee.get(code))
+        reconciliation.append(
+            {
+                "company_code": code,
+                "公司": name_map.get(code, code),
+                "主营业务收入": _safe_float(main_revenue.get(code)),
+                "实表管理费服务费": actual,
+                "理论非学科服务费": non_subject,
+                "未匹配非学科服务费": non_subject_unmatched,
+                "理论10204服务费": eryu,
+                "推定101管理中心收费": management,
+                "未匹配10204服务费": unmatched_eryu,
+                "差额": actual - non_subject - non_subject_unmatched - eryu - management - unmatched_eryu,
+            }
+        )
+    return {
+        "main_revenue": main_revenue,
+        "participants": participant_codes,
+        "non_subject_fee": non_subject_fee,
+        "non_subject_unmatched_fee": non_subject_unmatched_fee,
+        "eryu_fee": eryu_fee,
+        "unmatched_eryu_fee": unmatched_eryu_fee,
+        "management_fee": management_fee,
+        "actual_fee": actual_fee,
+        "reconciliation": pd.DataFrame(reconciliation),
+    }
+
+
+def _operating_card_revenue_cost_adjustment(
+    adjustments: dict | None,
+    codes: list[str],
+    *,
+    include_non_subject: bool,
+    include_management: bool,
+    include_eryu: bool = False,
+) -> float:
+    if not adjustments:
+        return 0.0
+    code_set = {str(code) for code in codes}
+    total = 0.0
+    if include_non_subject:
+        non_subject = adjustments.get("non_subject_fee") or {}
+        total += sum(_safe_float(non_subject.get(code)) for code in code_set)
+    if include_management:
+        management = adjustments.get("management_fee") or {}
+        total += sum(_safe_float(management.get(code)) for code in code_set)
+    if include_eryu:
+        eryu = adjustments.get("eryu_fee") or {}
+        total += sum(_safe_float(eryu.get(code)) for code in code_set)
+    return _safe_float(total)
+
+
+def _operating_card_company_name_map(company_codes: list[str]) -> dict[str, str]:
+    codes = [str(code) for code in company_codes if str(code)]
+    if not codes:
+        return {}
+    params = {f"code_{idx}": code for idx, code in enumerate(codes)}
+    placeholders = ", ".join(f":code_{idx}" for idx in range(len(codes)))
+    rows = execute_sql(
+        f"""
+        SELECT CAST(code AS TEXT) AS code, COALESCE(NULLIF(TRIM(name), ''), CAST(code AS TEXT)) AS name
+        FROM companies
+        WHERE CAST(code AS TEXT) IN ({placeholders})
+        """,
+        params,
+    )
+    return {str(row["code"]): str(row["name"]) for row in rows.to_dict("records")}
+
+
+def _operating_card_group_scopes(company_codes: list[str]) -> list[dict]:
+    scope_codes = [str(code) for code in company_codes if str(code)]
+    scope_set = set(scope_codes)
+    assigned: set[str] = set()
+    groups: list[dict] = []
+    for group in HOME_OPERATING_CARD_GROUPS:
+        group_code = group["code"]
+        candidate_codes = [group_code] if group_code == "101" else get_consolidation_company_codes(group_code)
+        codes = [code for code in candidate_codes if code in scope_set and code not in assigned]
+        if codes:
+            groups.append({**group, "codes": codes, "is_module": True})
+            assigned.update(codes)
+    name_map = _operating_card_company_name_map([code for code in scope_codes if code not in assigned])
+    for code in scope_codes:
+        if code in assigned:
+            continue
+        groups.append(
+            {
+                "key": f"company:{code}",
+                "label": name_map.get(code, code),
+                "code": code,
+                "codes": [code],
+                "is_module": False,
+            }
+        )
+        assigned.add(code)
+    return groups
+
+
+def _operating_card_group_label(group_key: str | None) -> str | None:
+    if not group_key:
+        return None
+    for group in HOME_OPERATING_CARD_GROUPS:
+        if group["key"] == group_key:
+            return group["label"]
+    return None
+
+
+def _operating_card_group_link(group_key: str, label: str) -> str:
+    return (
+        f'<a class="home-detail-row-link" href="?home_group=operating_summary&home_group_view={quote(str(group_key))}" '
+        f'target="_top" title="查看{_html(label)}公司明细">{_html(label)}</a>'
+    )
+
+
+def _operating_card_aggregate_rows(metrics: pd.DataFrame, label: str, revenue_cost_adjustment: float = 0.0) -> dict:
+    revenue = _safe_float(pd.to_numeric(metrics.get("收入"), errors="coerce").fillna(0.0).sum()) if len(metrics) else 0.0
+    cost_total = _safe_float(pd.to_numeric(metrics.get("成本费用合计"), errors="coerce").fillna(0.0).sum()) if len(metrics) else 0.0
+    net_profit = _safe_float(pd.to_numeric(metrics.get("净利润"), errors="coerce").fillna(0.0).sum()) if len(metrics) else 0.0
+    revenue -= _safe_float(revenue_cost_adjustment)
+    cost_total -= _safe_float(revenue_cost_adjustment)
+    return {
+        "模块组/公司": label,
+        "经营收入": revenue,
+        "成本费用合计": cost_total,
+        "经营净利润": net_profit,
+        "净利率": _safe_ratio_ui(net_profit, revenue),
+    }
+
+
+def _operating_card_group_summary(metrics: pd.DataFrame, company_codes: list[str], adjustments: dict | None = None) -> pd.DataFrame:
+    columns = ["模块组/公司", "经营收入", "成本费用合计", "经营净利润", "净利率"]
+    if metrics is None or metrics.empty:
+        return pd.DataFrame(columns=columns)
+    metric_codes = set(metrics["company_code"].astype(str).tolist())
+    rows: list[dict] = []
+    assigned_metric_codes: set[str] = set()
+    for group in _operating_card_group_scopes(company_codes):
+        group_codes = [code for code in group["codes"] if code in metric_codes and code not in assigned_metric_codes]
+        if not group_codes:
+            continue
+        group_metrics = metrics[metrics["company_code"].astype(str).isin(group_codes)]
+        label = group["label"]
+        display_label = _operating_card_group_link(group["key"], label) if group.get("is_module") else label
+        group_adjustment = _operating_card_revenue_cost_adjustment(
+            adjustments,
+            group_codes,
+            include_non_subject=group.get("key") == "quality" and HOME_NON_SUBJECT_CENTER_CODE in group_codes,
+            include_management=False,
+            include_eryu=group.get("key") == "eryu" and HOME_ERYU_CENTER_CODE in group_codes,
+        )
+        rows.append(_operating_card_aggregate_rows(group_metrics, display_label, group_adjustment))
+        assigned_metric_codes.update(group_codes)
+    if not rows:
+        return pd.DataFrame(columns=columns)
+    total_metrics = metrics[metrics["company_code"].astype(str).isin(assigned_metric_codes)]
+    total_adjustment = _operating_card_revenue_cost_adjustment(
+        adjustments,
+        list(assigned_metric_codes),
+        include_non_subject=HOME_NON_SUBJECT_CENTER_CODE in assigned_metric_codes,
+        include_management=HOME_MANAGEMENT_CENTER_CODE in assigned_metric_codes,
+        include_eryu=HOME_ERYU_CENTER_CODE in assigned_metric_codes,
+    )
+    total = _operating_card_aggregate_rows(total_metrics, "合计", total_adjustment)
+    result = pd.DataFrame(rows + [total], columns=columns)
+    return result
+
+
+def _operating_card_assigned_metric_codes(metrics: pd.DataFrame, company_codes: list[str]) -> list[str]:
+    if metrics is None or metrics.empty:
+        return []
+    metric_codes = set(metrics["company_code"].astype(str).tolist())
+    assigned: list[str] = []
+    seen: set[str] = set()
+    for group in _operating_card_group_scopes(company_codes):
+        for code in group["codes"]:
+            code = str(code)
+            if code in metric_codes and code not in seen:
+                assigned.append(code)
+                seen.add(code)
+    return assigned
+
+
+def _operating_card_bridge_summary(period: str, company_codes: list[str]) -> dict:
+    source_rows = _query_operating_card_source_rows(period, company_codes)
+    metrics = _operating_card_company_metrics_from_source(source_rows)
+    adjustments = _operating_card_internal_fee_split(source_rows, metrics, company_codes)
+    assigned_codes = _operating_card_assigned_metric_codes(metrics, company_codes)
+    metric_rows = metrics[metrics["company_code"].astype(str).isin(assigned_codes)] if len(assigned_codes) else pd.DataFrame()
+    raw_revenue = _safe_float(pd.to_numeric(metric_rows.get("收入"), errors="coerce").fillna(0.0).sum()) if len(metric_rows) else 0.0
+    raw_cost = _safe_float(pd.to_numeric(metric_rows.get("成本费用合计"), errors="coerce").fillna(0.0).sum()) if len(metric_rows) else 0.0
+    raw_profit = _safe_float(pd.to_numeric(metric_rows.get("净利润"), errors="coerce").fillna(0.0).sum()) if len(metric_rows) else 0.0
+    assigned_set = set(assigned_codes)
+    non_subject = _operating_card_revenue_cost_adjustment(
+        adjustments,
+        assigned_codes,
+        include_non_subject=HOME_NON_SUBJECT_CENTER_CODE in assigned_set,
+        include_management=False,
+    )
+    management = _operating_card_revenue_cost_adjustment(
+        adjustments,
+        assigned_codes,
+        include_non_subject=False,
+        include_management=HOME_MANAGEMENT_CENTER_CODE in assigned_set,
+    )
+    eryu = _operating_card_revenue_cost_adjustment(
+        adjustments,
+        assigned_codes,
+        include_non_subject=False,
+        include_management=False,
+        include_eryu=HOME_ERYU_CENTER_CODE in assigned_set,
+    )
+    other = 0.0
+    total_adjustment = _safe_float(non_subject + management + eryu + other)
+    unmatched_eryu = sum(_safe_float((adjustments.get("unmatched_eryu_fee") or {}).get(code)) for code in assigned_codes)
+    reconciliation = adjustments.get("reconciliation")
+    transactions: list[dict] = []
+    if isinstance(reconciliation, pd.DataFrame) and not reconciliation.empty:
+        for item in reconciliation.to_dict("records"):
+            code = str(item.get("company_code") or "")
+            non_subject_amount = _safe_float(item.get("理论非学科服务费"))
+            management_amount = _safe_float(item.get("推定101管理中心收费"))
+            eryu_amount = _safe_float(item.get("理论10204服务费"))
+            if abs(non_subject_amount) > 1e-9:
+                transactions.append(
+                    {
+                        "付款公司": code,
+                        "收款公司": HOME_NON_SUBJECT_CENTER_CODE,
+                        "科目": HOME_MANAGEMENT_FEE_ITEM,
+                        "金额": non_subject_amount,
+                        "层级": "素质中心/集团",
+                        "类别": "1010101非学科服务费",
+                    }
+                )
+            if abs(management_amount) > 1e-9:
+                transactions.append(
+                    {
+                        "付款公司": code,
+                        "收款公司": HOME_MANAGEMENT_CENTER_CODE,
+                        "科目": HOME_MANAGEMENT_FEE_ITEM,
+                        "金额": management_amount,
+                        "层级": "集团",
+                        "类别": "101管理中心服务费",
+                    }
+                )
+            if abs(eryu_amount) > 1e-9:
+                transactions.append(
+                    {
+                        "付款公司": code,
+                        "收款公司": HOME_ERYU_CENTER_CODE,
+                        "科目": HOME_MANAGEMENT_FEE_ITEM,
+                        "金额": eryu_amount,
+                        "层级": "尔遇书馆/集团",
+                        "类别": "10204尔遇书馆服务费",
+                    }
+                )
+    return {
+        "raw_revenue": raw_revenue,
+        "raw_cost_total": raw_cost,
+        "raw_net_profit": raw_profit,
+        "non_subject_fee": _safe_float(non_subject),
+        "management_fee": _safe_float(management),
+        "eryu_fee": _safe_float(eryu),
+        "other_fee": _safe_float(other),
+        "total_adjustment": total_adjustment,
+        "consolidated_revenue": _safe_float(raw_revenue - total_adjustment),
+        "consolidated_cost_total": _safe_float(raw_cost - total_adjustment),
+        "consolidated_net_profit": raw_profit,
+        "unmatched_eryu_fee": _safe_float(unmatched_eryu),
+        "transactions": transactions,
+        "reconciliation": reconciliation if isinstance(reconciliation, pd.DataFrame) else pd.DataFrame(),
+    }
+
+
+@st.cache_data(show_spinner=False, ttl=120)
+def _operating_card_bridge_summary_cached(period: str, company_codes: tuple[str, ...]) -> dict:
+    return _operating_card_bridge_summary(period, list(company_codes))
+
+
+def _home_company_rank_bridge_html(period: str, company_codes: list[str]) -> str:
+    bridge = _operating_card_bridge_summary_cached(period, tuple(company_codes))
+    total_adjustment = _safe_float(bridge.get("total_adjustment"))
+    pieces = [
+        f'<span class="home-detail-bridge-pill">单体收入合计 <strong>{_html(_fmt_money_compact(bridge.get("raw_revenue")))}</strong></span>',
+        f'<span class="home-detail-bridge-pill">减内部抵消 <strong>{_html(_fmt_money_compact(total_adjustment))}</strong></span>',
+        f'<span class="home-detail-bridge-pill">合并收入 <strong>{_html(_fmt_money_compact(bridge.get("consolidated_revenue")))}</strong></span>',
+        f'<span class="home-detail-bridge-pill">1010101 <strong>{_html(_fmt_money_compact(bridge.get("non_subject_fee")))}</strong></span>',
+        f'<span class="home-detail-bridge-pill">101 <strong>{_html(_fmt_money_compact(bridge.get("management_fee")))}</strong></span>',
+        f'<span class="home-detail-bridge-pill">10204 <strong>{_html(_fmt_money_compact(bridge.get("eryu_fee")))}</strong></span>',
+    ]
+    if abs(_safe_float(bridge.get("unmatched_eryu_fee"))) > 1e-6:
+        pieces.append(
+            f'<span class="home-detail-bridge-pill">10204未匹配 <strong>{_html(_fmt_money_compact(bridge.get("unmatched_eryu_fee")))}</strong></span>'
+        )
+    return (
+        '<div class="home-detail-bridge-note">'
+        '<span>公司排行采用单体原始口径；经营汇总采用合并口径，已抵消内部管理服务费。</span>'
+        + "".join(pieces)
+        + "</div>"
+    )
+
+
+def _operating_card_group_company_detail(
+    metrics: pd.DataFrame,
+    company_codes: list[str],
+    detail_group_key: str,
+) -> pd.DataFrame:
+    columns = ["公司", "经营收入", "成本费用合计", "经营净利润", "净利率"]
+    if metrics is None or metrics.empty:
+        return pd.DataFrame(columns=columns)
+    selected_group = None
+    for group in _operating_card_group_scopes(company_codes):
+        if group.get("is_module") and group["key"] == detail_group_key:
+            selected_group = group
+            break
+    if not selected_group:
+        return pd.DataFrame(columns=columns)
+    group_codes = set(selected_group["codes"])
+    detail = metrics[metrics["company_code"].astype(str).isin(group_codes)].copy()
+    if detail.empty:
+        return pd.DataFrame(columns=columns)
+    detail = detail.rename(columns={"收入": "经营收入", "净利润": "经营净利润"})
+    return detail[columns].sort_values("经营收入", ascending=False)
+
+
 def _query_balance_metric_by_company(
     period: str,
     company_codes: list[str],
@@ -3287,6 +5035,10 @@ def _home_budget_summary_from_budget_dashboard(period: str) -> dict:
     plan_df = read_budget_plan()
     actual_df = load_budget_actuals(period)
     overview_df, detail_df = build_budget_completion_data(plan_df, actual_df, str(period)[4:6])
+    return _home_budget_summary_payload(period, overview_df, detail_df)
+
+
+def _home_budget_summary_payload(period: str, overview_df: pd.DataFrame, detail_df: pd.DataFrame) -> dict:
     if overview_df.empty:
         return {}
     total_row = overview_df[overview_df["模块名称"] == "合计"]
@@ -3305,6 +5057,61 @@ def _home_budget_summary_from_budget_dashboard(period: str) -> dict:
         "progress": overview_df,
         "detail": detail_df,
     }
+
+
+def _budget_plan_for_actual_scope(plan_df: pd.DataFrame, actual_df: pd.DataFrame) -> pd.DataFrame:
+    if plan_df is None or plan_df.empty or actual_df is None or actual_df.empty:
+        return _budget_empty_plan_frame()
+    modules = {
+        _budget_text(value)
+        for value in actual_df.get("module", pd.Series(dtype=str)).tolist()
+        if _budget_text(value)
+    }
+    unit_pairs = {
+        (_budget_text(row.get("module")), _budget_text(row.get("unit_name")))
+        for row in actual_df.to_dict("records")
+        if _budget_text(row.get("module")) and _budget_text(row.get("unit_name"))
+    }
+    rows = []
+    for row in plan_df.to_dict("records"):
+        module = _budget_text(row.get("module"))
+        if not module or module == "合计" or module not in modules:
+            continue
+        level = _budget_text(row.get("budget_level"))
+        unit_name = _budget_text(row.get("unit_name"))
+        if level == "module" or (module, unit_name) in unit_pairs:
+            rows.append(row)
+    if not rows:
+        return _budget_empty_plan_frame()
+    return pd.DataFrame(rows, columns=_budget_empty_plan_frame().columns)
+
+
+def _home_budget_summary_for_scope(period: str, company_codes: list[str] | None) -> dict:
+    selected_codes = {str(code) for code in (company_codes or []) if str(code)}
+    if not selected_codes:
+        return _home_budget_summary_from_budget_dashboard(period)
+    plan_df = read_budget_plan()
+    actual_df = load_budget_actuals(period)
+    if actual_df.empty or "company_code" not in actual_df.columns:
+        return _home_budget_summary_payload(
+            period,
+            *build_budget_completion_data(_budget_empty_plan_frame(), _budget_empty_actual_frame(), str(period)[4:6]),
+        )
+    actual_codes = {str(code) for code in actual_df["company_code"].dropna().astype(str).tolist() if str(code)}
+    if actual_codes and actual_codes.issubset(selected_codes):
+        return _home_budget_summary_from_budget_dashboard(period)
+    scoped_actual = actual_df[actual_df["company_code"].astype(str).isin(selected_codes)].copy()
+    if scoped_actual.empty:
+        return _home_budget_summary_payload(
+            period,
+            *build_budget_completion_data(_budget_empty_plan_frame(), _budget_empty_actual_frame(), str(period)[4:6]),
+        )
+    scoped_actual = _budget_attach_internal_adjustments(scoped_actual, period)
+    scoped_plan = _budget_plan_for_actual_scope(plan_df, scoped_actual)
+    overview_df, detail_df = build_budget_completion_data(scoped_plan, scoped_actual, str(period)[4:6])
+    if not overview_df.empty and "合计" not in set(overview_df["模块名称"].astype(str)):
+        overview_df = pd.concat([overview_df, pd.DataFrame([_budget_total_row(overview_df)])], ignore_index=True)
+    return _home_budget_summary_payload(period, overview_df, detail_df)
 
 
 def _home_budget_plan_year() -> str | None:
@@ -3413,6 +5220,8 @@ def _load_metric_drilldown_cached(
 def _metric_drilldown_value_html(column: str, value) -> tuple[str, str]:
     text = str(column)
     class_names: list[str] = []
+    if text == "模块组/公司" and isinstance(value, str) and value.lstrip().startswith("<a "):
+        return value, " ".join(class_names)
     number_value: float | None = None
     try:
         if value is not None and not pd.isna(value):
@@ -3420,23 +5229,33 @@ def _metric_drilldown_value_html(column: str, value) -> tuple[str, str]:
     except (TypeError, ValueError):
         number_value = None
 
-    if number_value is not None and any(token in text for token in ("率", "占比", "偏离", "进度", "贡献", "环比", "同比", "变化")):
+    if number_value is not None and "排名" in text:
+        class_names.append("num")
+        display = f"{int(number_value):,}"
+    elif number_value is not None and (
+        any(token in text for token in ("率", "占比", "偏离", "进度", "贡献", "环比", "同比", "变化"))
+        or text in {"占成本费用比", "占收入比"}
+        or text.endswith("比")
+    ):
         class_names.append("num")
         display = f"{number_value * 100:.2f}%"
-    elif number_value is not None and any(token in text for token in ("收入", "利润", "资金", "账款", "预算", "实际", "资产", "负债", "差额")):
+    elif number_value is not None and (
+        any(token in text for token in ("收入", "利润", "资金", "账款", "预算", "实际", "资产", "负债", "差额", "金额", "成本", "费用"))
+        or text == "资金周转系数"
+    ):
         class_names.append("num")
         display = f"{number_value:,.2f}"
     elif number_value is not None:
         display = f"{number_value:,.2f}"
     else:
-        empty_display = "暂无" if text in {"环比", "同比"} else "-"
+        empty_display = "暂无" if any(token in text for token in ("环比", "同比")) else "-"
         display = empty_display if value is None or (isinstance(value, float) and pd.isna(value)) else str(value)
 
     if number_value is not None and number_value < 0:
         class_names.append("neg")
     elif number_value is not None and number_value > 0 and any(token in text for token in ("环比", "同比", "变化")):
         class_names.append("pos")
-    if text in {"是否亏损", "是否平衡", "状态"}:
+    if text in {"是否亏损", "是否平衡", "状态", "资金状态"} or text.endswith("状态"):
         label = str(display)
         if any(token in label for token in ("亏损", "不平衡", "滞后", "风险")):
             display = f'<span class="home-detail-tag-risk">{_html(label)}</span>'
@@ -3445,25 +5264,45 @@ def _metric_drilldown_value_html(column: str, value) -> tuple[str, str]:
         elif label and label != "-":
             display = f'<span class="home-detail-tag-good">{_html(label)}</span>'
         return display, " ".join(class_names)
+    if text == "异常类型":
+        labels = [item.strip() for item in str(display).split("、") if item.strip() and item.strip() != "-"]
+        if labels:
+            display = "".join(f'<span class="home-detail-tag-risk">{_html(label)}</span>' for label in labels)
+            return display, " ".join(class_names)
     return _html(display), " ".join(class_names)
 
 
 def _metric_drilldown_column_class(column: str) -> str:
     text = str(column)
-    if text == "公司":
+    if text in {"公司", "经营单位", "模块组/公司"}:
         return "col-company"
-    if text in {"业务板块", "模块"}:
+    if text in {"业务板块", "模块", "费用类别", "明细类型"}:
         return "col-text"
-    if text in {"是否亏损", "是否平衡", "状态"}:
+    if text in {"是否亏损", "是否平衡", "状态", "资金状态"} or text.endswith("状态"):
         return "col-status"
-    if any(token in text for token in ("率", "占比", "偏离", "进度", "贡献", "环比", "同比", "变化")):
+    if "排名" in text:
+        return "col-number"
+    if (
+        any(token in text for token in ("率", "占比", "偏离", "进度", "贡献", "环比", "同比", "变化"))
+        or text in {"占成本费用比", "占收入比"}
+        or text.endswith("比")
+    ):
         return "col-percent"
-    if any(token in text for token in ("收入", "利润", "资金", "账款", "预算", "实际", "资产", "负债", "差额")):
+    if any(token in text for token in ("收入", "利润", "资金", "账款", "预算", "实际", "资产", "负债", "差额", "金额", "成本", "费用")) or text == "资金周转系数":
         return "col-number"
     return "col-text"
 
 
-def _metric_drilldown_sort_href(metric_key: str, column: str, current_sort: str | None, current_order: str | None) -> tuple[str, str, str]:
+def _metric_drilldown_sort_href(
+    metric_key: str,
+    column: str,
+    current_sort: str | None,
+    current_order: str | None,
+    key_param: str = "drill_metric",
+    sort_param: str = "drill_sort",
+    order_param: str = "drill_order",
+    extra_params: dict[str, str] | None = None,
+) -> tuple[str, str, str]:
     is_active = str(column) == str(current_sort or "")
     active_order = str(current_order or "asc").lower()
     next_order = "desc" if is_active and active_order == "asc" else "asc"
@@ -3473,7 +5312,15 @@ def _metric_drilldown_sort_href(metric_key: str, column: str, current_sort: str 
     else:
         icon = "⇅"
         icon_class = "home-detail-sort"
-    href = f"?drill_metric={quote(str(metric_key))}&drill_sort={quote(str(column))}&drill_order={next_order}"
+    params = [
+        (key_param, str(metric_key)),
+        (sort_param, str(column)),
+        (order_param, next_order),
+    ]
+    for param_key, param_value in (extra_params or {}).items():
+        if param_value is not None and str(param_value):
+            params.append((param_key, str(param_value)))
+    href = "?" + "&".join(f"{quote(str(param_key))}={quote(str(param_value))}" for param_key, param_value in params)
     return href, icon, icon_class
 
 
@@ -3487,7 +5334,12 @@ def _sort_metric_drilldown_df(df: pd.DataFrame, sort_column: str | None, sort_or
         numeric_values = pd.to_numeric(sorted_df[sort_column], errors="coerce")
         sorted_df["_sort_value"] = numeric_values
         return sorted_df.sort_values("_sort_value", ascending=ascending, na_position="last").drop(columns=["_sort_value"])
-    return sorted_df.sort_values(sort_column, ascending=ascending, na_position="last", key=lambda series: series.astype(str))
+    return sorted_df.sort_values(
+        sort_column,
+        ascending=ascending,
+        na_position="last",
+        key=lambda series: series.astype(str).str.replace(r"<[^>]+>", "", regex=True),
+    )
 
 
 def _metric_drilldown_colgroup_html(columns: list[str]) -> str:
@@ -3512,6 +5364,10 @@ def _metric_drilldown_table_html(
     metric_key: str = "",
     current_sort: str | None = None,
     current_order: str | None = None,
+    key_param: str = "drill_metric",
+    sort_param: str = "drill_sort",
+    order_param: str = "drill_order",
+    extra_params: dict[str, str] | None = None,
 ) -> str:
     if df is None or df.empty:
         return '<div class="home-detail-empty">当前范围暂无可展示的下钻数据。</div>'
@@ -3520,7 +5376,16 @@ def _metric_drilldown_table_html(
     headers = []
     for column in view_df.columns:
         col_class = _metric_drilldown_column_class(str(column))
-        href, icon, icon_class = _metric_drilldown_sort_href(metric_key, str(column), current_sort, current_order)
+        href, icon, icon_class = _metric_drilldown_sort_href(
+            metric_key,
+            str(column),
+            current_sort,
+            current_order,
+            key_param=key_param,
+            sort_param=sort_param,
+            order_param=order_param,
+            extra_params=extra_params,
+        )
         headers.append(
             f'<th class="{_html(col_class)}">'
             f'<a class="home-detail-sort-link" href="{_html(href)}" target="_top" title="按{_html(str(column))}排序">'
@@ -3580,6 +5445,156 @@ def _render_metric_drilldown_layer(
         '<div class="home-detail-subtitle">'
         f'{_html(_home_period_label(period))} · 范围：{_html(scope_label)} · 点击后按需加载明细'
         '</div>'
+        '</div>'
+        '<a class="home-detail-close" href="?" target="_top" title="关闭详情层" aria-label="关闭详情层">×</a>'
+        '</div>'
+        f'<div class="home-detail-body">{table_html}</div>'
+        '</div>'
+        '</div>'
+    )
+    st.markdown(detail_html, unsafe_allow_html=True)
+
+
+def _load_home_card_group_detail(
+    group_key: str,
+    period: str,
+    company_codes: list[str],
+    detail_key: str | None = None,
+) -> pd.DataFrame:
+    if group_key == "budget_execution":
+        budget = _home_budget_summary_for_scope(period, company_codes)
+        overview_df = budget.get("progress") if isinstance(budget, dict) else pd.DataFrame()
+        view = _budget_comparison_table_view(overview_df)
+        if view.empty:
+            return view
+        return view[
+            [
+                "经营单位",
+                "收入预算",
+                "收入实际",
+                "收入完成率",
+                "利润预算",
+                "利润实际",
+                "利润完成率",
+                "时间进度",
+                "进度判断",
+            ]
+        ]
+    if group_key == "operating_summary":
+        return _query_operating_card_group_by_company(period, company_codes, detail_key)
+    if group_key == "expense_analysis":
+        return _home_expense_analysis_detail_for_scope(period, company_codes)
+    if group_key == "funds_safety":
+        rows = _home_funds_rows_for_scope(period, tuple(company_codes))
+        if rows is None or rows.empty:
+            return pd.DataFrame(
+                columns=[
+                    "公司",
+                    "货币资金",
+                    "其他应收款",
+                    "其他应付款",
+                    "可使用周转资金",
+                    "近6月平均经营成本",
+                    "资金周转系数",
+                    "资金状态",
+                ]
+            )
+        return rows.rename(columns={"公司/校区": "公司"})[
+            [
+                "公司",
+                "货币资金",
+                "其他应收款",
+                "其他应付款",
+                "可使用周转资金",
+                "近6月平均经营成本",
+                "资金周转系数",
+                "资金状态",
+            ]
+        ]
+    if group_key == "funds_turnover_risk":
+        rows = _funds_risk_rows(_home_funds_rows_for_scope(period, tuple(company_codes)))
+        if rows is None or rows.empty:
+            return pd.DataFrame(
+                columns=[
+                    "公司",
+                    "可使用周转资金",
+                    "近6月平均经营成本",
+                    "资金周转系数",
+                    "资金状态",
+                ]
+            )
+        return rows.rename(columns={"公司/校区": "公司"})[
+            [
+                "公司",
+                "可使用周转资金",
+                "近6月平均经营成本",
+                "资金周转系数",
+                "资金状态",
+            ]
+        ]
+    if group_key == "company_profit_rank":
+        return _home_company_rank_detail_for_scope(period, tuple(company_codes))
+    if group_key == "operating_anomaly":
+        return _home_operating_anomaly_detail_for_scope(period, tuple(company_codes))
+    return pd.DataFrame()
+
+
+@st.cache_data(show_spinner=False, ttl=120)
+def _load_home_card_group_detail_cached(
+    group_key: str,
+    period: str,
+    company_codes: tuple[str, ...],
+    detail_key: str | None = None,
+) -> pd.DataFrame:
+    return _load_home_card_group_detail(group_key, period, list(company_codes), detail_key)
+
+
+def _render_home_card_group_layer(
+    group_key: str,
+    period: str,
+    scope_label: str,
+    company_codes: list[str],
+) -> None:
+    cfg = HOME_CARD_GROUP_CONFIG.get(group_key)
+    if not cfg:
+        return
+    detail_key = _get_query_param("home_group_view") if group_key == "operating_summary" else None
+    detail_label = _operating_card_group_label(detail_key) if group_key == "operating_summary" else None
+    if detail_key and not detail_label:
+        detail_key = None
+    detail_df = _load_home_card_group_detail_cached(group_key, period, tuple(company_codes), detail_key)
+    sort_column = _get_query_param("home_group_sort")
+    sort_order = _get_query_param("home_group_order")
+    if sort_order not in {"asc", "desc"}:
+        sort_order = None
+    table_html = _metric_drilldown_table_html(
+        detail_df,
+        metric_key=group_key,
+        current_sort=sort_column,
+        current_order=sort_order,
+        key_param="home_group",
+        sort_param="home_group_sort",
+        order_param="home_group_order",
+        extra_params={"home_group_view": detail_key} if detail_label else None,
+    )
+    back_html = (
+        '<a class="home-detail-back" href="?home_group=operating_summary" target="_top">← 返回模块组汇总</a>'
+        if detail_label
+        else ""
+    )
+    bridge_html = _home_company_rank_bridge_html(period, company_codes) if group_key == "company_profit_rank" else ""
+    title = f'{cfg["title"]} · {detail_label}' if detail_label else cfg["title"]
+    detail_html = (
+        '<div class="home-detail-overlay">'
+        '<div class="home-detail-layer home-detail-modal">'
+        '<div class="home-detail-header">'
+        '<div>'
+        f'{back_html}'
+        f'<div class="home-detail-title">{_html(title)}</div>'
+        '<div class="home-detail-subtitle">'
+        f'{_html(_home_period_label(period))} · 范围：{_html(scope_label)} · {_html(cfg["subtitle"])}'
+        '</div>'
+        f'{bridge_html}'
         '</div>'
         '<a class="home-detail-close" href="?" target="_top" title="关闭详情层" aria-label="关闭详情层">×</a>'
         '</div>'
@@ -3699,10 +5714,7 @@ def render_home():
         return
 
     income = dashboard.get("income", {})
-    balance = dashboard.get("balance", {})
     budget = dashboard.get("budget", {})
-    funds = dashboard.get("funds", pd.DataFrame())
-    ranking = dashboard.get("ranking", pd.DataFrame())
     completeness = dashboard.get("import_completeness", {})
     anomalies = dashboard.get("anomalies", [])
     scope_label = _workspace_scope_label(filters)
@@ -3746,55 +5758,30 @@ def render_home():
             scope_label,
             filtered_company_codes,
         )
+    home_group = _get_query_param("home_group")
+    selected_home_group = home_group if drill_metric not in HOME_DRILL_CONFIG and home_group in HOME_CARD_GROUP_CONFIG else None
+    if selected_home_group:
+        _render_home_card_group_layer(
+            selected_home_group,
+            period,
+            scope_label,
+            filtered_company_codes,
+        )
+    expense_analysis = _home_expense_analysis_for_scope(period, tuple(filtered_company_codes))
+    funds_warning_rows = _home_funds_rows_for_scope(period, tuple(filtered_company_codes))
+    company_rank_summary = _home_company_rank_summary_for_scope(period, tuple(filtered_company_codes))
+    operating_anomaly_counts = _home_operating_anomaly_summary_counts_for_scope(period, tuple(filtered_company_codes))
 
     _render_html(
         f"""
         <div class="bi-section-grid">
-            {_render_budget_panel(budget)}
-            {_render_funds_panel(balance, income)}
-            {_render_health_panel(completeness, anomalies, balance)}
-        </div>
-        """
-    )
-
-    rank_body = _bar_rows_html(
-        ranking,
-        "公司",
-        "收入",
-        8,
-        _fmt_money_compact,
-        positive_good=True,
-    )
-    funds_body = _bar_rows_html(
-        funds,
-        "公司",
-        "可使用周转金",
-        8,
-        _fmt_money_compact,
-        positive_good=True,
-    )
-    alerts_body = _alerts_html(anomalies)
-    summary_body = f"""
-        <div class="bi-micro">
-            <div class="bi-micro-row"><div class="label">本月收入</div><div class="value">{_html(_fmt_money_compact(income.get("revenue")))}</div></div>
-            <div class="bi-micro-row"><div class="label">本月净利润</div><div class="value">{_html(_fmt_money_compact(income.get("net_profit")))}</div></div>
-            <div class="bi-micro-row"><div class="label">净利率</div><div class="value">{_html(_fmt_percent(income.get("net_margin")))}</div></div>
-            <div class="bi-micro-row"><div class="label">资产负债平衡差</div><div class="value">{_html(_fmt_money_compact(balance.get("balance_gap")))}</div></div>
-        </div>
-    """
-    rank_panel = _panel_html("校区收入排行", "先看规模，再看利润和净利率下钻", rank_body)
-    funds_panel = _panel_html("资金周转风险", "按可使用周转金从低到高排序", funds_body)
-    alerts_panel = _panel_html("异常事项", "负周转、亏损和资产负债不平会优先显示", alerts_body)
-    summary_panel = _panel_html("经营摘要", "给经营分析会的第一屏结论", summary_body)
-    _render_html(
-        f"""
-        <div class="bi-two-col">
-            {rank_panel}
-            {funds_panel}
-        </div>
-        <div class="bi-two-col">
-            {alerts_panel}
-            {summary_panel}
+            {_render_budget_execution_panel(_home_budget_summary_for_scope(period, filtered_company_codes), selected_home_group)}
+            {_render_operating_summary_panel(_home_operating_summary_for_scope(period, tuple(filtered_company_codes)), selected_home_group)}
+            {_render_expense_analysis_panel(expense_analysis, selected_home_group)}
+            {_render_company_profit_rank_panel(company_rank_summary, selected_home_group)}
+            {_render_funds_safety_panel(funds_warning_rows, selected_home_group)}
+            {_render_operating_anomaly_panel(operating_anomaly_counts, selected_home_group)}
+            {_render_funds_turnover_risk_panel(funds_warning_rows, selected_home_group)}
         </div>
         """
     )
@@ -4759,7 +6746,7 @@ def _picture_brief_metric_pairs(values: list[str]) -> list[tuple[str, str]]:
 
 def _picture_brief_kpi_labels(brief_type: str) -> list[str]:
     if brief_type == "本年累计":
-        return ["本年累计收入", "经营净利润", "净利率", "人工", "租金", "成本费用合计"]
+        return ["本年累计收入", "经营净利润", "净利率", "素质中心完成任务情况", "已完成比例", "目标"]
     return ["本月经营收入", "经营净利润", "净利率", "人工", "租金", "成本费用合计"]
 
 
@@ -4852,10 +6839,48 @@ def _picture_brief_amount_text(value: float) -> str:
         return "-"
 
 
+def _picture_brief_target_text(value: float | None) -> str:
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return "-"
+    if not amount:
+        return "-"
+    if abs(amount) >= 100000000:
+        return f"{amount / 100000000:.2f}".rstrip("0").rstrip(".") + "亿"
+    return _picture_brief_amount_text(amount)
+
+
 def _picture_brief_ratio_text(numerator: float, denominator: float) -> str:
     if not denominator:
         return "-"
     return f"{numerator / denominator * 100:.0f}%"
+
+
+def _picture_brief_quality_income_target() -> float | None:
+    path = Path(BUDGET_WORKBOOK_PATH)
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return _picture_brief_quality_income_target_cached(str(path), stat.st_mtime_ns, stat.st_size)
+
+
+@st.cache_data(show_spinner=False)
+def _picture_brief_quality_income_target_cached(path: str, mtime_ns: int, size: int) -> float | None:
+    plan = read_budget_plan(path)
+    if len(plan) == 0:
+        return None
+    matched = plan[
+        (plan.get("module", "").astype(str) == "东莞素质中心")
+        & (plan.get("unit_name", "").astype(str) == "东莞素质中心")
+    ]
+    if len(matched) == 0:
+        matched = plan[plan.get("module", "").astype(str) == "东莞素质中心"]
+    if len(matched) == 0:
+        return None
+    value = _safe_float(matched.iloc[0].get("income_budget"))
+    return value if value else None
 
 
 def _picture_brief_scope_values(rows: pd.DataFrame, company_codes: list[str] | None, use_ytd: bool) -> dict[str, float]:
@@ -5004,12 +7029,25 @@ def _picture_brief_company_descendants_from_rows(
     return result
 
 
-def _picture_brief_kpis_from_pl_rows(rows: pd.DataFrame, brief_type: str) -> list[tuple[str, str]]:
+def _picture_brief_kpis_from_pl_rows(
+    rows: pd.DataFrame, brief_type: str, company_tree: pd.DataFrame | None = None
+) -> list[tuple[str, str]]:
     use_ytd = brief_type == "本年累计"
     values = _picture_brief_scope_values(rows, None, use_ytd)
     revenue = values.get("收入合计", 0.0)
     profit = values.get("净利润", 0.0)
     labels = _picture_brief_kpi_labels(brief_type)
+    quality_revenue = 0.0
+    quality_target = None
+    if use_ytd:
+        quality_codes = (
+            _picture_brief_company_descendants_from_rows(company_tree, "10101", include_root=False)
+            if company_tree is not None
+            else _picture_brief_company_descendants("10101", include_root=False)
+        )
+        quality_values = _picture_brief_scope_values(rows, quality_codes, True)
+        quality_revenue = quality_values.get("收入合计", 0.0)
+        quality_target = _picture_brief_quality_income_target()
     value_by_label = {
         "本月经营收入": _picture_brief_amount_text(revenue),
         "本年累计收入": _picture_brief_amount_text(revenue),
@@ -5018,6 +7056,9 @@ def _picture_brief_kpis_from_pl_rows(rows: pd.DataFrame, brief_type: str) -> lis
         "人工": _picture_brief_amount_text(values.get("人工", 0.0)),
         "租金": _picture_brief_amount_text(values.get("房租水电", 0.0)),
         "成本费用合计": _picture_brief_amount_text(values.get("成本费用合计", 0.0)),
+        "素质中心完成任务情况": _picture_brief_amount_text(quality_revenue),
+        "已完成比例": _picture_brief_ratio_text(quality_revenue, quality_target or 0.0),
+        "目标": _picture_brief_target_text(quality_target),
     }
     return [(label, value_by_label.get(label, "-")) for label in labels]
 
@@ -5079,8 +7120,8 @@ def _picture_brief_operating_context(period: str) -> dict[str, list]:
     month_quality_rows = _picture_brief_quality_section_from_pl_rows(rows, "月报", company_tree)
     ytd_quality_rows = _picture_brief_quality_section_from_pl_rows(rows, "本年累计", company_tree)
     return {
-        "month_kpis": _picture_brief_kpis_from_pl_rows(rows, "月报"),
-        "ytd_kpis": _picture_brief_kpis_from_pl_rows(rows, "本年累计"),
+        "month_kpis": _picture_brief_kpis_from_pl_rows(rows, "月报", company_tree),
+        "ytd_kpis": _picture_brief_kpis_from_pl_rows(rows, "本年累计", company_tree),
         "month_quality_rows": month_quality_rows,
         "ytd_quality_rows": ytd_quality_rows,
         "month_other_rows": _picture_brief_mapped_section_from_pl_rows(
@@ -5134,6 +7175,19 @@ def _picture_brief_clean_section_rows(rows: list[list[str]]) -> list[list[str]]:
         if any(_picture_brief_text(row[idx]) for row in normalized)
     ]
     return [[row[idx] for idx in keep_indices] for row in normalized]
+
+
+def _picture_brief_compact_display_columns(rows: list[list[str]]) -> list[list[str]]:
+    normalized = _picture_brief_clean_section_rows(rows)
+    if len(normalized) <= 1:
+        return normalized
+    max_cols = max(len(row) for row in normalized)
+    padded = [row + [""] * (max_cols - len(row)) for row in normalized]
+    keep_indices = [0]
+    for idx in range(1, max_cols):
+        if any(_picture_brief_text(row[idx]) for row in padded[1:]):
+            keep_indices.append(idx)
+    return [[row[idx] for idx in keep_indices] for row in padded]
 
 
 def _picture_brief_section_lookup(rows: list[list[str]], row_label: str, col_label: str) -> str:
@@ -5231,6 +7285,7 @@ def _picture_brief_cell_html(value: str) -> str:
 
 
 def _picture_brief_table_html(title: str, rows: list[list[str]]) -> str:
+    rows = _picture_brief_compact_display_columns(rows)
     if not rows:
         return f"""
         <section class="picture-brief-section">
@@ -5255,7 +7310,12 @@ def _picture_brief_table_html(title: str, rows: list[list[str]]) -> str:
         class_attr = f' class="{row_classes}"' if row_classes else ""
         body.append(f"<tr{class_attr}>{''.join(_picture_brief_cell_html(value) for value in values)}</tr>")
     section_class = "picture-brief-section picture-brief-campus-section" if title == "各校区具体情况" else "picture-brief-section"
-    table_class = "picture-brief-table picture-brief-campus-table" if title == "各校区具体情况" else "picture-brief-table"
+    table_classes = ["picture-brief-table"]
+    if title == "各校区具体情况":
+        table_classes.append("picture-brief-campus-table")
+    if column_count > 4:
+        table_classes.append("picture-brief-wide-table")
+    table_class = " ".join(table_classes)
     return f"""
     <section class="{section_class}">
       <h3>{_html(title)}</h3>
@@ -5328,7 +7388,7 @@ def _picture_brief_styles() -> str:
         padding-bottom: 8px;
         border-bottom: 1px solid #dbe5f2;
       }
-      .picture-brief-table-scroll { overflow-x: auto; width: 100%; }
+      .picture-brief-table-scroll { overflow: auto; width: 100%; max-height: 70vh; }
       .picture-brief-table {
         width: 100%;
         min-width: 720px;
@@ -5360,6 +7420,28 @@ def _picture_brief_styles() -> str:
         font-weight: 850;
         text-align: center;
       }
+      .picture-brief-table tr.picture-brief-header-row td {
+        position: sticky;
+        top: 0;
+        z-index: 4;
+      }
+      .picture-brief-wide-table tr.picture-brief-header-row td:first-child {
+        left: 0;
+        z-index: 7;
+        box-shadow: 2px 0 0 rgba(148, 163, 184, 0.24);
+      }
+      .picture-brief-wide-table td:first-child {
+        position: sticky;
+        left: 0;
+        z-index: 3;
+        background: #ffffff;
+        box-shadow: 2px 0 0 rgba(148, 163, 184, 0.18);
+      }
+      .picture-brief-wide-table tr:nth-child(even) td:first-child { background: #fbfdff; }
+      .picture-brief-wide-table tr.picture-brief-section-row td:first-child { background: #eaf2ff; }
+      .picture-brief-wide-table tr.picture-brief-total-row td:first-child { background: #edf5ff; }
+      .picture-brief-wide-table tr.picture-brief-risk-row td:first-child { background: #fff1f1; }
+      .picture-brief-wide-table td.picture-brief-negative:first-child { background: #fff7f7; }
       .picture-brief-table tr.picture-brief-total-row td {
         background: #edf5ff;
         font-weight: 850;
@@ -6100,6 +8182,32 @@ def _funds_warning_status_tag(status: str) -> str:
     return f'<span class="funds-warning-status {class_name}">{_html(status)}</span>'
 
 
+@st.cache_data(show_spinner=False, ttl=120)
+def _home_company_business_group_lookup() -> dict[str, str]:
+    try:
+        rows = execute_sql(
+            """
+            SELECT c.code,
+                   c.name,
+                   c.short_name,
+                   COALESCE(NULLIF(TRIM(d.business_group), ''), '未分组') AS business_group
+            FROM companies c
+            LEFT JOIN dim_company d ON d.company_id = c.code
+            WHERE c.status = 1
+            """
+        )
+    except Exception:
+        return {}
+    mapping: dict[str, str] = {}
+    for item in rows.to_dict("records"):
+        group = str(item.get("business_group") or "未分组")
+        for key in (item.get("code"), item.get("name"), item.get("short_name")):
+            text = str(key or "").strip()
+            if text:
+                mapping[text] = group
+    return mapping
+
+
 def _funds_warning_cell(value, numeric: bool = False) -> str:
     text = _html(value)
     negative_class = ""
@@ -6167,13 +8275,16 @@ def _funds_warning_styles() -> str:
       .funds-warning-table-head { display:flex; align-items:center; justify-content:space-between; margin:18px 0 8px; }
       .funds-warning-table-head h3 { margin:0; color:#10233f; font-size:20px; font-weight:850; }
       .funds-warning-table-head span { color:#64748b; font-size:13px; font-weight:700; }
-      .funds-warning-table-wrap { width:100%; overflow-x:auto; border:1px solid #dbe5f2; border-radius:8px; background:#fff; }
+      .funds-warning-table-wrap { width:100%; overflow:auto; max-height:68vh; border:1px solid #dbe5f2; border-radius:8px; background:#fff; }
       .funds-warning-table { width:100%; min-width:1180px; border-collapse:collapse; table-layout:fixed; color:#10233f; font-size:15px; }
       .funds-warning-company-col { width:220px; }
       .funds-warning-data-col { width:120px; }
-      .funds-warning-table th { background:#eaf2ff; border:1px solid #d7e4f5; padding:11px 10px; text-align:center; font-weight:850; }
+      .funds-warning-table th { position:sticky; top:0; z-index:4; background:#eaf2ff; border:1px solid #d7e4f5; padding:11px 10px; text-align:center; font-weight:850; }
+      .funds-warning-table th:first-child { left:0; z-index:7; box-shadow:2px 0 0 rgba(148,163,184,.24); }
       .funds-warning-table td { border:1px solid #dbe5f2; padding:10px 10px; vertical-align:middle; background:#fff; }
       .funds-warning-table tbody tr:nth-child(even) td { background:#fbfdff; }
+      .funds-warning-table td:first-child { position:sticky; left:0; z-index:3; background:#fff; box-shadow:2px 0 0 rgba(148,163,184,.18); }
+      .funds-warning-table tbody tr:nth-child(even) td:first-child { background:#fbfdff; }
       .funds-warning-text { text-align:center; overflow-wrap:anywhere; }
       .funds-warning-num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
       .funds-warning-negative { color:#dc2626; font-weight:750; }
@@ -6876,7 +8987,7 @@ def _operating_design_css() -> str:
       }
       .profit-original-card-title{font-size:15px;font-weight:720;color:var(--text-main);}
       .profit-original-card-tip{font-size:12px;color:var(--text-secondary);}
-      .profit-original-table-scroll{max-height:none;overflow:visible;background:#fff;}
+      .profit-original-table-scroll{max-height:70vh;overflow:auto;background:#fff;}
       .profit-original-table{width:100%;min-width:0;border-collapse:separate;border-spacing:0;font-size:13px;table-layout:fixed;}
       .profit-original-table th:nth-child(1),.profit-original-table td:nth-child(1){width:18%;}
       .profit-original-table th:nth-child(2),.profit-original-table td:nth-child(2){width:14%;}
@@ -6887,6 +8998,7 @@ def _operating_design_css() -> str:
       .profit-original-table th:nth-child(7),.profit-original-table td:nth-child(7){width:9%;}
       .profit-original-table th:nth-child(8),.profit-original-table td:nth-child(8){width:17%;}
       .profit-original-table th{
+        position:sticky;top:0;z-index:4;
         height:44px;background:var(--table-header-bg);
         color:var(--text-main);font-size:13px;font-weight:680;text-align:center;
         border-right:1px solid rgba(148,163,184,.24);border-bottom:1px solid rgba(148,163,184,.24);
@@ -6898,9 +9010,13 @@ def _operating_design_css() -> str:
         color:var(--text-main);font-variant-numeric:tabular-nums;
       }
       .profit-original-table th:first-child,.profit-original-table td:first-child{
-        text-align:center;border-left:1px solid rgba(148,163,184,.24);
+        position:sticky;left:0;text-align:center;border-left:1px solid rgba(148,163,184,.24);
+        box-shadow:2px 0 0 rgba(148,163,184,.18);
       }
+      .profit-original-table th:first-child{z-index:7;box-shadow:2px 0 0 rgba(148,163,184,.24);}
+      .profit-original-table td:first-child{z-index:3;}
       .profit-original-table td:first-child{background:#fff;font-weight:650;}
+      .profit-original-table tr:nth-child(even) td:first-child{background:#fbfdff;}
       .profit-original-table tr:nth-child(even) td{background:#fbfdff;}
       .profit-original-table tr.summary-row td{background:var(--summary-row-bg);font-weight:800;}
       .profit-original-table tr.profit-row td{background:var(--profit-row-bg);color:var(--danger);font-weight:800;}
@@ -7688,13 +9804,47 @@ def _expense_ratio(amount: float, denominator: float) -> float:
     return _safe_float(amount) / denominator
 
 
+def _expense_bridge_summary(cost_total: float, categories: pd.DataFrame, management_amount: float) -> dict:
+    six_total = 0.0
+    if categories is not None and not categories.empty and "本月金额" in categories.columns:
+        six_total = _safe_float(pd.to_numeric(categories["本月金额"], errors="coerce").fillna(0.0).sum())
+    raw_difference = _safe_float(cost_total) - six_total - _safe_float(management_amount)
+    is_negative = raw_difference < -1e-9
+    return {
+        "cost_total": _safe_float(cost_total),
+        "six_category_total": six_total,
+        "management_fee": _safe_float(management_amount),
+        "other_fee": 0.0 if is_negative else _safe_float(raw_difference),
+        "check_difference": _safe_float(abs(raw_difference)) if is_negative else 0.0,
+        "raw_difference": _safe_float(raw_difference),
+        "label": "待核对差额" if is_negative else "其他费用",
+        "status": "warning" if is_negative else "ok",
+    }
+
+
+def _expense_bridge_sentence(bridge: dict) -> str:
+    if not isinstance(bridge, dict) or not bridge:
+        return "成本费用合计 = 六类重点费用 + 管理费服务费 + 其他费用。"
+    if bridge.get("status") == "warning":
+        return (
+            "成本费用合计 = 六类重点费用 + 管理费服务费 - 待核对差额；"
+            f"当前差额 {_fmt_money_compact(bridge.get('check_difference'))}，需复核范围或重复归集。"
+        )
+    return (
+        "成本费用合计 = 六类重点费用 + 管理费服务费 + 其他费用；"
+        f"其他费用 {_fmt_money_compact(bridge.get('other_fee'))}。"
+    )
+
+
 def build_focus_expense_analysis(source_df: pd.DataFrame) -> dict:
     if source_df is None or source_df.empty:
         empty = pd.DataFrame(columns=["费用类别", "本月金额", "占成本费用比", "占收入比", "状态说明"])
+        bridge = _expense_bridge_summary(0.0, empty, 0.0)
         return {
             "categories": empty,
             "ranking": pd.DataFrame(columns=["费用类别", "主要经营单位", "本月金额", "占比", "判断"]),
             "management_fee": {"amount": 0.0, "cost_ratio": 0.0, "revenue_ratio": 0.0},
+            "expense_bridge": bridge,
             "cost_total": 0.0,
             "revenue_total": 0.0,
             "conclusion": "当前期间暂无收入成本费用明细表数据。",
@@ -7771,6 +9921,7 @@ def build_focus_expense_analysis(source_df: pd.DataFrame) -> dict:
         if abs(management_amount) > 1e-9
         else "管理费服务费本期未匹配到明细"
     )
+    bridge = _expense_bridge_summary(cost_total, categories, management_amount)
     return {
         "categories": categories,
         "ranking": ranking,
@@ -7779,9 +9930,10 @@ def build_focus_expense_analysis(source_df: pd.DataFrame) -> dict:
             "cost_ratio": _expense_ratio(management_amount, cost_total),
             "revenue_ratio": _expense_ratio(management_amount, revenue_total),
         },
+        "expense_bridge": bridge,
         "cost_total": cost_total,
         "revenue_total": revenue_total,
-        "conclusion": f"本月费用重点：{top_text}，{management_text}。",
+        "conclusion": f"本月费用重点：{top_text}，{management_text}。{_expense_bridge_sentence(bridge)}",
     }
 
 
@@ -7856,6 +10008,7 @@ def render_expense_subject_analysis():
     )
 
     management = analysis["management_fee"]
+    bridge = analysis.get("expense_bridge", {})
     st.markdown("### 口径提醒")
     with st.container(border=True):
         st.markdown(
@@ -7864,6 +10017,9 @@ def render_expense_subject_analysis():
             占成本费用 {_safe_float(management["cost_ratio"]) * 100:.1f}%、
             占收入 {_safe_float(management["revenue_ratio"]) * 100:.1f}%。
             该项目属于内部管理收费，合并口径下后续需要抵消，不与外部经营费用混看。
+
+            **{_html(bridge.get("label", "其他费用"))}** {_fmt_money_compact(bridge.get("check_difference") if bridge.get("status") == "warning" else bridge.get("other_fee"))}。
+            {_expense_bridge_sentence(bridge)}
             """
         )
         st.caption(f"当前范围：{scope_label} · 期间：{period} · 分母优先使用收入成本费用表中的成本费用合计和收入合计。")
@@ -9008,11 +11164,13 @@ def _income_statement_table_html(display_df: pd.DataFrame, value_df: pd.DataFram
         body.append(f"<tr>{''.join(cells)}</tr>")
     return f"""
     <style>
-      .income-statement-scroll{{overflow-x:auto;width:100%;}}
+      .income-statement-scroll{{overflow:auto;width:100%;max-height:70vh;}}
       .income-statement-table{{border-collapse:collapse;min-width:1160px;width:max-content;background:white;}}
       .income-statement-table th,.income-statement-table td{{border:1px solid #d9e2ef;padding:9px 10px;font-size:14px;line-height:1.35;}}
-      .income-statement-table th{{background:#eaf2ff;color:#10233f;text-align:center;font-weight:700;white-space:normal;}}
-      .income-statement-table .item-cell{{min-width:320px;max-width:420px;white-space:normal;word-break:break-word;text-align:left;font-weight:600;}}
+      .income-statement-table th{{position:sticky;top:0;z-index:4;background:#eaf2ff;color:#10233f;text-align:center;font-weight:700;white-space:normal;}}
+      .income-statement-table th:first-child{{left:0;z-index:7;box-shadow:2px 0 0 rgba(148,163,184,.24);}}
+      .income-statement-table .item-cell{{position:sticky;left:0;z-index:3;min-width:320px;max-width:420px;white-space:normal;word-break:break-word;text-align:left;font-weight:600;background:#fff;box-shadow:2px 0 0 rgba(148,163,184,.18);}}
+      .income-statement-table tbody tr:nth-child(even) .item-cell{{background:#fbfdff;}}
       .income-statement-table .amount-cell{{min-width:145px;text-align:right;white-space:nowrap;}}
       .income-statement-table .negative-rate-cell{{color:#b42318;background:#fff1f0;font-weight:800;}}
     </style>
@@ -9103,6 +11261,29 @@ def _budget_text(value) -> str:
     return str(value or "").strip()
 
 
+_BUDGET_PSEUDO_ROW_NAMES = {"合计", "合并", "总计"}
+
+
+def _budget_is_pseudo_row_label(value) -> bool:
+    label = _budget_text(value)
+    if not label:
+        return False
+    return label in _BUDGET_PSEUDO_ROW_NAMES or label.startswith(("SUMMARY_", "OPERATING_"))
+
+
+def _budget_filter_pseudo_rows(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+    attrs = getattr(df, "attrs", {}).copy()
+    mask = pd.Series(False, index=df.index)
+    for column in columns:
+        if column in df.columns:
+            mask = mask | df[column].apply(_budget_is_pseudo_row_label)
+    result = df.loc[~mask].copy()
+    result.attrs.update(attrs)
+    return result
+
+
 def _budget_numeric(value) -> float:
     if isinstance(value, str) and not value.strip():
         return 0.0
@@ -9147,6 +11328,225 @@ def _budget_module_for_name(name: str, business_group: str | None = None) -> str
     if group in BUDGET_BUSINESS_GROUP_MODULES:
         return BUDGET_BUSINESS_GROUP_MODULES[group]
     return "未分组"
+
+
+def _budget_module_for_actual_company(
+    company_code: str,
+    name: str,
+    business_group: str | None = None,
+) -> str:
+    code = _budget_text(company_code)
+    if code == HOME_MANAGEMENT_CENTER_CODE:
+        return "管理中心"
+    if code and code in set(get_consolidation_company_codes("10101")):
+        return "东莞素质中心"
+    if code and code in set(get_consolidation_company_codes(HOME_ERYU_CENTER_CODE)):
+        return "尔遇书馆"
+    if code and code in set(get_consolidation_company_codes("10118")):
+        return "青少年宫"
+    if code and code in set(get_consolidation_company_codes("10108")):
+        return "多维学校"
+    label = _budget_text(name)
+    if "托育" in label:
+        return "托育项目"
+    if code and code in set(get_consolidation_company_codes("10107")):
+        return "新阳光幼儿园"
+    return _budget_module_for_name(label, business_group)
+
+
+def _budget_pl_detail_ytd_source_rows(period: str, company_codes: list[str] | None = None) -> pd.DataFrame:
+    columns = [
+        "id", "公司编码", "company_code", "item_code", "item_name", "amount", "ytd_amount",
+        "short_name", "company_name", "parent_code", "business_group", "公司",
+    ]
+    if not period:
+        return pd.DataFrame(columns=columns)
+    params = {"period": period}
+    company_sql = ""
+    if company_codes is not None:
+        codes = [_budget_text(code) for code in company_codes if _budget_text(code)]
+        if not codes:
+            return pd.DataFrame(columns=columns)
+        company_sql = _company_filter_clause("d", codes, params, "budget_pl_ytd")
+    try:
+        rows = execute_sql(
+            f"""
+            SELECT
+                d.id,
+                d.company_code AS 公司编码,
+                d.company_code AS company_code,
+                d.item_code,
+                d.item_name,
+                COALESCE(d.ytd_amount, 0) AS amount,
+                COALESCE(d.ytd_amount, 0) AS ytd_amount,
+                COALESCE(NULLIF(TRIM(c.short_name), ''), '') AS short_name,
+                COALESCE(NULLIF(TRIM(c.name), ''), '') AS company_name,
+                COALESCE(NULLIF(TRIM(c.parent_code), ''), '') AS parent_code,
+                COALESCE(NULLIF(TRIM(dim.business_group), ''), '') AS business_group,
+                COALESCE(NULLIF(TRIM(c.name), ''), d.company_code) AS 公司
+            FROM pl_detail d
+            LEFT JOIN companies c ON CAST(c.code AS TEXT) = CAST(d.company_code AS TEXT)
+            LEFT JOIN dim_company dim ON CAST(dim.company_id AS TEXT) = CAST(d.company_code AS TEXT)
+            WHERE d.period = :period
+              AND d.item_name IN (:revenue_item, :profit_item, :cost_item, :main_revenue_item, :management_fee_item)
+              {company_sql}
+            """,
+            {
+                **params,
+                "revenue_item": PL_REVENUE_ITEM,
+                "profit_item": PL_NET_PROFIT_ITEM,
+                "cost_item": PL_COST_TOTAL_ITEM,
+                "main_revenue_item": HOME_MAIN_REVENUE_ITEM,
+                "management_fee_item": HOME_MANAGEMENT_FEE_ITEM,
+            },
+        )
+    except Exception:
+        return pd.DataFrame(columns=columns)
+    if rows is None or rows.empty:
+        return pd.DataFrame(columns=columns)
+    for column in columns:
+        if column not in rows.columns:
+            rows[column] = ""
+    return rows[columns]
+
+
+def _budget_actual_company_codes(actual_df: pd.DataFrame) -> list[str]:
+    if actual_df is None or actual_df.empty or "company_code" not in actual_df.columns:
+        return []
+    seen: set[str] = set()
+    codes: list[str] = []
+    for code in actual_df["company_code"].dropna().astype(str).tolist():
+        code = _budget_text(code)
+        if code and code not in seen and code != "__budget_only__":
+            seen.add(code)
+            codes.append(code)
+    return codes
+
+
+def _budget_internal_adjustment_for_scope(module_name: str, codes: list[str], adjustments: dict | None) -> float:
+    code_set = set(codes)
+    module = _budget_text(module_name)
+    has_non_subject_receiver = HOME_NON_SUBJECT_CENTER_CODE in code_set
+    has_eryu_receiver = HOME_ERYU_CENTER_CODE in code_set
+    if module == "东莞素质中心":
+        recognized = _operating_card_revenue_cost_adjustment(
+            adjustments,
+            codes,
+            include_non_subject=has_non_subject_receiver,
+            include_management=False,
+            include_eryu=False,
+        )
+        unmatched = (
+            sum(_safe_float((adjustments or {}).get("non_subject_unmatched_fee", {}).get(code)) for code in code_set)
+            if has_non_subject_receiver
+            else 0.0
+        )
+        return _safe_float(recognized + unmatched)
+    if module == "尔遇书馆":
+        recognized = _operating_card_revenue_cost_adjustment(
+            adjustments,
+            codes,
+            include_non_subject=False,
+            include_management=False,
+            include_eryu=has_eryu_receiver,
+        )
+        unmatched = (
+            sum(_safe_float((adjustments or {}).get("unmatched_eryu_fee", {}).get(code)) for code in code_set)
+            if has_eryu_receiver
+            else 0.0
+        )
+        return _safe_float(recognized + unmatched)
+    if module == "合计":
+        recognized = _operating_card_revenue_cost_adjustment(
+            adjustments,
+            codes,
+            include_non_subject=has_non_subject_receiver,
+            include_management=HOME_MANAGEMENT_CENTER_CODE in code_set,
+            include_eryu=has_eryu_receiver,
+        )
+        unmatched = 0.0
+        if has_non_subject_receiver:
+            unmatched += sum(
+                _safe_float((adjustments or {}).get("non_subject_unmatched_fee", {}).get(code))
+                for code in code_set
+            )
+        if has_eryu_receiver:
+            unmatched += sum(
+                _safe_float((adjustments or {}).get("unmatched_eryu_fee", {}).get(code))
+                for code in code_set
+            )
+        return _safe_float(recognized + unmatched)
+    return 0.0
+
+
+def _budget_internal_adjustment_context(actual_df: pd.DataFrame, period: str) -> dict:
+    codes = _budget_actual_company_codes(actual_df)
+    if not codes:
+        return {"period": period, "module_adjustments": {}, "total_adjustment": 0.0, "components": {}}
+    code_set = set(codes)
+    source_rows = _budget_pl_detail_ytd_source_rows(period, codes)
+    metrics = _operating_card_company_metrics_from_source(source_rows)
+    adjustments = _operating_card_internal_fee_split(
+        source_rows,
+        metrics,
+        codes,
+        assign_residual_to_management=False,
+    )
+    module_adjustments: dict[str, float] = {}
+    if actual_df is not None and not actual_df.empty:
+        for module, module_rows in actual_df.groupby(actual_df["module"].astype(str), dropna=False):
+            module_codes = _budget_actual_company_codes(module_rows)
+            value = _budget_internal_adjustment_for_scope(module, module_codes, adjustments)
+            if abs(value) > 1e-9:
+                module_adjustments[str(module)] = _safe_float(value)
+    total_adjustment = _budget_internal_adjustment_for_scope("合计", codes, adjustments)
+    components = {
+        "1010101非学科服务费": _operating_card_revenue_cost_adjustment(
+            adjustments,
+            codes,
+            include_non_subject=HOME_NON_SUBJECT_CENTER_CODE in code_set,
+            include_management=False,
+            include_eryu=False,
+        ),
+        "1010101非学科待匹配": sum(
+            _safe_float((adjustments.get("non_subject_unmatched_fee") or {}).get(code))
+            for code in codes
+        ) if HOME_NON_SUBJECT_CENTER_CODE in code_set else 0.0,
+        "101管理中心服务费": _operating_card_revenue_cost_adjustment(
+            adjustments,
+            codes,
+            include_non_subject=False,
+            include_management=HOME_MANAGEMENT_CENTER_CODE in code_set,
+            include_eryu=False,
+        ),
+        "10204尔遇书馆服务费": _operating_card_revenue_cost_adjustment(
+            adjustments,
+            codes,
+            include_non_subject=False,
+            include_management=False,
+            include_eryu=HOME_ERYU_CENTER_CODE in code_set,
+        ),
+        "10204尔遇书馆待匹配": sum(
+            _safe_float((adjustments.get("unmatched_eryu_fee") or {}).get(code))
+            for code in codes
+        ) if HOME_ERYU_CENTER_CODE in code_set else 0.0,
+    }
+    unmatched_total = _safe_float(components["1010101非学科待匹配"] + components["10204尔遇书馆待匹配"])
+    return {
+        "period": period,
+        "company_codes": codes,
+        "module_adjustments": module_adjustments,
+        "total_adjustment": _safe_float(total_adjustment),
+        "components": {key: _safe_float(value) for key, value in components.items()},
+        "unmatched_adjustment": unmatched_total,
+    }
+
+
+def _budget_attach_internal_adjustments(actual_df: pd.DataFrame, period: str) -> pd.DataFrame:
+    result = actual_df.copy() if actual_df is not None else _budget_empty_actual_frame()
+    result.attrs["budget_period"] = period
+    result.attrs["budget_internal_adjustments"] = _budget_internal_adjustment_context(result, period)
+    return result
 
 
 def read_budget_plan(
@@ -9254,41 +11654,25 @@ def read_quality_center_campus_budget_targets(
 def load_quality_center_actual_income(period: str) -> pd.DataFrame:
     if not period:
         return _budget_empty_quality_center_actual_frame()
-    try:
-        df = execute_sql(
-            """
-            SELECT
-                COALESCE(NULLIF(TRIM(i.original_name), ''), NULLIF(TRIM(c.short_name), ''), NULLIF(TRIM(c.name), ''), i.company_code) AS actual_name,
-                i.company_code AS company_code,
-                SUM(CASE
-                    WHEN i.cumulative_value IS NOT NULL THEN i.cumulative_value
-                    WHEN i.period1_value IS NOT NULL THEN i.period1_value
-                    ELSE 0
-                END) AS actual_income
-            FROM income_statement i
-            LEFT JOIN companies c ON CAST(c.code AS TEXT) = CAST(i.company_code AS TEXT)
-            WHERE i.period = :period
-              AND i.item_name IN ('一、营业收入', '营业收入', '收入合计')
-            GROUP BY i.company_code, i.original_name, c.short_name, c.name
-            """,
-            {"period": period},
-        )
-    except Exception:
+    actuals = load_budget_actuals(period)
+    if actuals is None or actuals.empty:
         return _budget_empty_quality_center_actual_frame()
-    if df is None or df.empty:
+    result = actuals[actuals["module"].astype(str) == "东莞素质中心"].copy()
+    if result.empty:
         return _budget_empty_quality_center_actual_frame()
-    result = df.copy()
+    result = result.rename(columns={"unit_name": "actual_name", "income_actual": "actual_income"})
     result["actual_name"] = result["actual_name"].apply(_budget_text)
     result["company_code"] = result["company_code"].apply(_budget_text)
     result["actual_income"] = pd.to_numeric(result["actual_income"], errors="coerce").fillna(0.0)
-    result = result[result["actual_name"] != ""]
+    result = result[(result["actual_name"] != "") & (result["company_code"] != "")]
     if result.empty:
         return _budget_empty_quality_center_actual_frame()
-    return (
-        result.groupby(["actual_name", "company_code"], dropna=False, as_index=False)["actual_income"]
-        .sum()
-        .loc[:, _budget_empty_quality_center_actual_frame().columns]
+    deduped = (
+        result.sort_values(["company_code", "actual_name"])
+        .groupby("company_code", dropna=False, as_index=False)
+        .agg({"actual_name": "first", "actual_income": "sum"})
     )
+    return deduped.loc[:, _budget_empty_quality_center_actual_frame().columns]
 
 
 def _budget_quality_match_key(name: str) -> str:
@@ -9324,9 +11708,15 @@ def _budget_quality_candidate_text(candidates: list[dict]) -> str:
     return "、".join(values)
 
 
-def _budget_quality_confirmed_candidate(campus_name: str, actual_by_name: dict[str, list[dict]]) -> dict | None:
+def _budget_quality_confirmed_candidate(
+    campus_name: str,
+    actual_by_name: dict[str, list[dict]],
+    actual_by_key: dict[str, list[dict]] | None = None,
+) -> dict | None:
     for actual_name in get_budget_campus_name_mappings().get(campus_name, ()):
         candidates = actual_by_name.get(actual_name, [])
+        if not candidates and actual_by_key is not None:
+            candidates = actual_by_key.get(_budget_quality_match_key(actual_name), [])
         if len(candidates) == 1:
             return candidates[0]
     return None
@@ -9352,6 +11742,7 @@ def match_quality_center_campus_actuals(targets_df: pd.DataFrame, actual_df: pd.
             actual_by_key.setdefault(normalized, []).append(record)
 
     rows = []
+    used_company_codes: set[str] = set()
     for target in targets_df.to_dict("records"):
         campus_name = _budget_text(target.get("campus_name"))
         budget = _safe_float(target.get("income_budget"))
@@ -9376,8 +11767,24 @@ def match_quality_center_campus_actuals(targets_df: pd.DataFrame, actual_df: pd.
             )
             continue
 
-        confirmed_candidate = _budget_quality_confirmed_candidate(campus_name, actual_by_name)
+        confirmed_candidate = _budget_quality_confirmed_candidate(campus_name, actual_by_name, actual_by_key)
         if confirmed_candidate:
+            code = _budget_text(confirmed_candidate.get("company_code"))
+            if code and code in used_company_codes:
+                rows.append(
+                    {
+                        "campus_name": campus_name,
+                        "income_budget": budget,
+                        "actual_name": "",
+                        "company_code": "",
+                        "actual_income": None,
+                        "match_status": "待确认",
+                        "match_note": f"公司编码 {code} 已匹配到其他预算校区，避免重复加总",
+                    }
+                )
+                continue
+            if code:
+                used_company_codes.add(code)
             rows.append(
                 {
                     "campus_name": campus_name,
@@ -9414,6 +11821,15 @@ def match_quality_center_campus_actuals(targets_df: pd.DataFrame, actual_df: pd.
         elif len(contains_candidates) > 1:
             status = "待确认"
             note = f"候选不唯一：{_budget_quality_candidate_text(contains_candidates)}"
+
+        if chosen:
+            code = _budget_text(chosen.get("company_code"))
+            if code and code in used_company_codes:
+                note = f"公司编码 {code} 已匹配到其他预算校区，避免重复加总"
+                status = "待确认"
+                chosen = None
+            elif code:
+                used_company_codes.add(code)
 
         rows.append(
             {
@@ -9463,52 +11879,93 @@ def _budget_actual_unit_label(row: dict) -> str:
     return "未命名公司"
 
 
+def _budget_actual_values_match(left: pd.Series, right: pd.Series) -> bool:
+    return (
+        abs(_safe_float(left.get("income_actual")) - _safe_float(right.get("income_actual"))) < 1e-6
+        and abs(_safe_float(left.get("profit_actual")) - _safe_float(right.get("profit_actual"))) < 1e-6
+    )
+
+
+def _budget_prune_stale_parent_actuals(actual: pd.DataFrame) -> pd.DataFrame:
+    """Drop stale parent-code duplicates left by old imports; keep single-company rows unchanged."""
+    if actual is None or actual.empty or "company_code" not in actual.columns:
+        return actual
+    rows = actual.reset_index(drop=True).copy()
+    drop_indexes: set[int] = set()
+    for left_idx, left in rows.iterrows():
+        if left_idx in drop_indexes:
+            continue
+        left_code = _budget_text(left.get("company_code"))
+        if not left_code:
+            continue
+        for right_idx, right in rows.iterrows():
+            if left_idx == right_idx or right_idx in drop_indexes:
+                continue
+            if _budget_text(left.get("module")) != _budget_text(right.get("module")):
+                continue
+            if not _budget_actual_values_match(left, right):
+                continue
+            right_code = _budget_text(right.get("company_code"))
+            right_parent = _budget_text(right.get("parent_code"))
+            if not right_code or left_code == right_code:
+                continue
+            is_left_parent = right_parent == left_code or (
+                len(left_code) < len(right_code) and right_code.startswith(left_code)
+            )
+            if is_left_parent:
+                drop_indexes.add(left_idx)
+                break
+    if not drop_indexes:
+        return actual
+    return rows.drop(index=sorted(drop_indexes)).reset_index(drop=True)
+
+
 def load_budget_actuals(period: str) -> pd.DataFrame:
     if not period:
         return _budget_empty_actual_frame()
-    params = {
-        "period": period,
-        "revenue_item": "一、营业收入",
-        "profit_item": "四、净利润（净亏损以“-”号填列）",
-    }
-    df = execute_sql(
-        """
-        SELECT
-            i.company_code,
-            COALESCE(NULLIF(TRIM(i.original_name), ''), '') AS original_name,
-            COALESCE(NULLIF(TRIM(c.short_name), ''), '') AS short_name,
-            COALESCE(NULLIF(TRIM(c.name), ''), '') AS company_name,
-            COALESCE(NULLIF(TRIM(d.business_group), ''), '') AS business_group,
-            SUM(CASE WHEN i.item_name = :revenue_item THEN i.cumulative_value ELSE 0 END) AS income_actual,
-            SUM(CASE WHEN i.item_name = :profit_item THEN i.cumulative_value ELSE 0 END) AS profit_actual
-        FROM income_statement i
-        LEFT JOIN companies c ON CAST(c.code AS TEXT) = CAST(i.company_code AS TEXT)
-        LEFT JOIN dim_company d ON CAST(d.company_id AS TEXT) = CAST(i.company_code AS TEXT)
-        WHERE i.period = :period AND i.item_name IN (:revenue_item, :profit_item)
-        GROUP BY i.company_code, i.original_name, c.short_name, c.name, d.business_group
-        """,
-        params,
-    )
-    if df.empty:
+    source_rows = _budget_pl_detail_ytd_source_rows(period)
+    if source_rows is None or source_rows.empty:
         return _budget_empty_actual_frame()
+    target_rows = source_rows[source_rows["item_name"].astype(str).isin({PL_REVENUE_ITEM, PL_NET_PROFIT_ITEM})].copy()
+    preferred = preferred_pl_detail_rows(target_rows)
+    if preferred.empty:
+        return _budget_empty_actual_frame()
+    preferred["_amount"] = pd.to_numeric(preferred.get("amount"), errors="coerce").fillna(0.0)
+    pivot = (
+        preferred.pivot_table(
+            index=["company_code", "short_name", "company_name", "parent_code", "business_group"],
+            columns="item_name",
+            values="_amount",
+            aggfunc="sum",
+            fill_value=0.0,
+        )
+        .reset_index()
+        .rename_axis(None, axis=1)
+    )
+    for column in (PL_REVENUE_ITEM, PL_NET_PROFIT_ITEM):
+        if column not in pivot.columns:
+            pivot[column] = 0.0
     rows = []
-    for row in df.to_dict("records"):
+    for row in pivot.to_dict("records"):
         label = _budget_actual_unit_label(row)
-        module = _budget_module_for_name(label, row.get("business_group"))
+        module = _budget_module_for_actual_company(row.get("company_code"), label, row.get("business_group"))
         rows.append(
             {
                 "module": module,
                 "unit_name": label,
                 "company_code": _budget_text(row.get("company_code")),
-                "income_actual": _safe_float(row.get("income_actual")),
-                "profit_actual": _safe_float(row.get("profit_actual")),
+                "parent_code": _budget_text(row.get("parent_code")),
+                "income_actual": _safe_float(row.get(PL_REVENUE_ITEM)),
+                "profit_actual": _safe_float(row.get(PL_NET_PROFIT_ITEM)),
             }
         )
-    actual = pd.DataFrame(rows, columns=_budget_empty_actual_frame().columns)
-    return (
+    actual = pd.DataFrame(rows)
+    actual = _budget_prune_stale_parent_actuals(actual)
+    actual = (
         actual.groupby(["module", "unit_name", "company_code"], dropna=False, as_index=False)
         .agg({"income_actual": "sum", "profit_actual": "sum"})
     )
+    return _budget_attach_internal_adjustments(actual[_budget_empty_actual_frame().columns], period)
 
 
 def _budget_value_missing(value) -> bool:
@@ -9553,6 +12010,11 @@ def build_budget_completion_data(
     progress = budget_time_progress(selected_month)
     plan_df = plan_df.copy() if plan_df is not None else _budget_empty_plan_frame()
     actual_df = actual_df.copy() if actual_df is not None else _budget_empty_actual_frame()
+    plan_df = _budget_filter_pseudo_rows(plan_df, ["module", "unit_name"])
+    actual_df = _budget_filter_pseudo_rows(actual_df, ["module", "unit_name"])
+    internal_context = actual_df.attrs.get("budget_internal_adjustments", {}) if hasattr(actual_df, "attrs") else {}
+    module_adjustments = internal_context.get("module_adjustments", {}) if isinstance(internal_context, dict) else {}
+    total_adjustment = _safe_float(internal_context.get("total_adjustment")) if isinstance(internal_context, dict) else 0.0
 
     module_rows = plan_df[plan_df["budget_level"] == "module"] if len(plan_df) else _budget_empty_plan_frame()
     unit_rows = plan_df[plan_df["budget_level"] != "module"] if len(plan_df) else _budget_empty_plan_frame()
@@ -9591,6 +12053,8 @@ def build_budget_completion_data(
     ]
     for module in sorted(set(module_budget["module"]).union(set(actual_by_module["module"])) - set(modules)):
         modules.append(module)
+    if modules and "合计" not in modules:
+        modules.append("合计")
 
     overview_rows = []
     for module in modules:
@@ -9602,19 +12066,16 @@ def build_budget_completion_data(
             else:
                 income_budget = _safe_float(module_budget.loc[module_budget["module"] != "合计", "income_budget"].sum())
                 profit_budget = _safe_float(module_budget.loc[module_budget["module"] != "合计", "profit_budget"].sum())
-            actual_row = actual_by_module[actual_by_module["module"] == module]
-            if len(actual_row):
-                income_actual = _safe_float(actual_row["income_actual"].sum())
-                profit_actual = _safe_float(actual_row["profit_actual"].sum())
-            else:
-                income_actual = _safe_float(actual_by_module.loc[actual_by_module["module"] != "合计", "income_actual"].sum())
-                profit_actual = _safe_float(actual_by_module.loc[actual_by_module["module"] != "合计", "profit_actual"].sum())
+            raw_income_actual = _safe_float(actual_by_module.loc[actual_by_module["module"] != "合计", "income_actual"].sum())
+            income_actual = raw_income_actual - total_adjustment
+            profit_actual = _safe_float(actual_by_module.loc[actual_by_module["module"] != "合计", "profit_actual"].sum())
         else:
             budget_row = module_budget[module_budget["module"] == module]
             actual_row = actual_by_module[actual_by_module["module"] == module]
             income_budget = _safe_float(budget_row["income_budget"].sum()) if len(budget_row) else 0.0
             profit_budget = _safe_float(budget_row["profit_budget"].sum()) if len(budget_row) else 0.0
-            income_actual = _safe_float(actual_row["income_actual"].sum()) if len(actual_row) else 0.0
+            raw_income_actual = _safe_float(actual_row["income_actual"].sum()) if len(actual_row) else 0.0
+            income_actual = raw_income_actual - _safe_float(module_adjustments.get(module))
             profit_actual = _safe_float(actual_row["profit_actual"].sum()) if len(actual_row) else 0.0
         income_completion, income_gap = _budget_metric_progress(income_actual, income_budget, progress, "income")
         profit_completion, profit_gap = _budget_metric_progress(profit_actual, profit_budget, progress, "profit")
@@ -9725,7 +12186,11 @@ def build_budget_completion_data(
                 "利润预算", "利润实际", "利润完成率", "利润进度差", "状态",
             ]
         )
-    return pd.DataFrame(overview_rows), details
+    overview = pd.DataFrame(overview_rows)
+    if isinstance(internal_context, dict):
+        overview.attrs["budget_internal_adjustments"] = internal_context
+        details.attrs["budget_internal_adjustments"] = internal_context
+    return overview, details
 
 
 def _budget_display_frame(df: pd.DataFrame) -> pd.DataFrame:
@@ -9804,7 +12269,7 @@ def _budget_overview_view(df: pd.DataFrame) -> pd.DataFrame:
 def _budget_detail_view(df: pd.DataFrame, progress: float) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame()
-    view = df.copy()
+    view = _budget_filter_pseudo_rows(df.copy(), ["module", "公司名称", "unit_name"])
     view["收入进度"] = view.apply(
         lambda row: _format_budget_progress_cell(row.get("收入完成率"), progress, row.get("收入进度差")),
         axis=1,
@@ -9900,27 +12365,48 @@ def _budget_single_status(gap) -> str:
     return "超前" if gap_value >= 0.02 else "正常"
 
 
-def _budget_average_completion(overview_df: pd.DataFrame) -> float | None:
+def _budget_average_completion(overview_df: pd.DataFrame, metric: str = "income") -> float | None:
     if overview_df is None or overview_df.empty:
         return None
     rows = overview_df.copy()
     if "模块名称" in rows.columns:
-        rows = rows[rows["模块名称"].astype(str) != "合计"]
+        rows = rows[~rows["模块名称"].apply(_budget_is_pseudo_row_label)]
+    if metric == "profit":
+        budget_col = "利润预算"
+        actual_col = "利润实际"
+        completion_col = "利润完成率"
+    else:
+        budget_col = "收入预算"
+        actual_col = "收入实际"
+        completion_col = "收入完成率"
     values: list[float] = []
-    for column in ["收入完成率", "利润完成率"]:
-        if column not in rows.columns:
+    if not {budget_col, actual_col, completion_col}.issubset(rows.columns):
+        return None
+    excluded_statuses = {"暂无预算", "待开业", "已取消", "待接入", "待匹配", "待确认"}
+    for row in rows.to_dict("records"):
+        if _budget_text(row.get("状态")) in excluded_statuses:
             continue
-        for value in rows[column].tolist():
-            if not _budget_value_missing(value):
-                values.append(_safe_float(value))
+        budget = _safe_float(row.get(budget_col))
+        if budget <= 0:
+            continue
+        if _budget_value_missing(row.get(actual_col)) or _budget_value_missing(row.get(completion_col)):
+            continue
+        values.append(_safe_float(row.get(completion_col)))
     if not values:
         return None
     return sum(values) / len(values)
 
 
+def _fmt_budget_average_completion(value) -> str:
+    if _budget_value_missing(value):
+        return "暂无可比单位"
+    return _fmt_budget_rate(value)
+
+
 def _budget_kpi_cards_html(overview_df: pd.DataFrame, selected_month: str | int, progress: float) -> str:
     total = _budget_total_row(overview_df)
-    average_completion = _budget_average_completion(overview_df)
+    income_average_completion = _budget_average_completion(overview_df, "income")
+    profit_average_completion = _budget_average_completion(overview_df, "profit")
     income_completion = _fmt_budget_rate(total.get("收入完成率"))
     profit_completion = _fmt_budget_rate(total.get("利润完成率"))
     if profit_completion == "-":
@@ -9942,7 +12428,7 @@ def _budget_kpi_cards_html(overview_df: pd.DataFrame, selected_month: str | int,
         <div class="budget-kpi-title">收入预算完成情况</div>
         <div class="budget-kpi-value">实际收入 {_html(_fmt_budget_wan(total.get("收入实际")))}</div>
         <div class="budget-kpi-sub">收入预算 {_html(_fmt_budget_wan(total.get("收入预算")))} · 收入完成率 {_html(income_completion)}</div>
-        <div class="budget-kpi-sub">时间进度 {progress * 100:.1f}% · 平均完成度 {_html(_fmt_budget_rate(average_completion))}</div>
+        <div class="budget-kpi-sub">时间进度 {progress * 100:.1f}% · 平均完成度 {_html(_fmt_budget_average_completion(income_average_completion))}</div>
         <div class="budget-kpi-delta">{_html(_fmt_budget_gap(total.get("收入进度差")))}</div>
         <div class="budget-kpi-sub">状态：{_html(_budget_single_status(total.get("收入进度差")))}</div>
       </div>
@@ -9950,7 +12436,7 @@ def _budget_kpi_cards_html(overview_df: pd.DataFrame, selected_month: str | int,
         <div class="budget-kpi-title">利润预算完成情况</div>
         <div class="budget-kpi-value">实际利润 {_html(_fmt_budget_wan(total.get("利润实际")))}</div>
         <div class="budget-kpi-sub">利润预算 {_html(_fmt_budget_wan(total.get("利润预算")))} · 利润完成率 {_html(profit_completion)}</div>
-        <div class="budget-kpi-sub">时间进度 {progress * 100:.1f}% · 平均完成度 {_html(_fmt_budget_rate(average_completion))}</div>
+        <div class="budget-kpi-sub">时间进度 {progress * 100:.1f}% · 平均完成度 {_html(_fmt_budget_average_completion(profit_average_completion))}</div>
         <div class="budget-kpi-delta">{_html(_fmt_budget_gap(total.get("利润进度差")))}</div>
         <div class="budget-kpi-sub">状态：{_html(_budget_single_status(total.get("利润进度差")))}</div>
       </div>
@@ -10082,17 +12568,18 @@ def _render_budget_comparison_table(
         <style>
           .budget-table-toolbar{{display:flex;justify-content:flex-end;align-items:center;margin:-28px 0 6px;}}
           .budget-unit-note{{color:#64748b;font-size:12px;font-weight:750;}}
-          .budget-table-scroll{{width:100%;overflow-x:auto;border:1px solid #d5deeb;border-radius:10px;background:#fff;box-shadow:0 10px 22px rgba(15,23,42,.04);}}
+          .budget-table-scroll{{width:100%;overflow:auto;max-height:68vh;border:1px solid #d5deeb;border-radius:10px;background:#fff;box-shadow:0 10px 22px rgba(15,23,42,.04);}}
           .budget-comparison-table{{width:100%;min-width:1040px;border-collapse:collapse;table-layout:fixed;background:#fff;}}
-          .budget-comparison-table th{{background:#eaf2ff;color:#10233f;font-size:13px;font-weight:850;text-align:right;padding:10px 12px;border-right:1px solid #d9e3f1;border-bottom:1px solid #c9d7e8;white-space:nowrap;}}
-          .budget-comparison-table th:first-child{{text-align:left;width:17%;}}
+          .budget-comparison-table th{{position:sticky;top:0;z-index:4;background:#eaf2ff;color:#10233f;font-size:13px;font-weight:850;text-align:right;padding:10px 12px;border-right:1px solid #d9e3f1;border-bottom:1px solid #c9d7e8;white-space:nowrap;}}
+          .budget-comparison-table th:first-child{{left:0;z-index:7;text-align:left;width:17%;box-shadow:2px 0 0 rgba(148,163,184,.24);}}
           .budget-comparison-table th:nth-child(2),.budget-comparison-table th:nth-child(3),.budget-comparison-table th:nth-child(5),.budget-comparison-table th:nth-child(6){{width:12%;}}
           .budget-comparison-table th:nth-child(4),.budget-comparison-table th:nth-child(7),.budget-comparison-table th:nth-child(8){{width:10%;}}
           .budget-comparison-table th:last-child{{width:9%;border-right:0;text-align:center;}}
           .budget-comparison-table td{{background:#fff;color:#10233f;font-size:13px;padding:10px 12px;border-right:1px solid #e3ebf6;border-bottom:1px solid #e3ebf6;vertical-align:middle;line-height:1.35;}}
           .budget-comparison-table tr:nth-child(even) td{{background:#fbfdff;}}
           .budget-comparison-table td:last-child{{border-right:0;}}
-          .budget-table-first{{text-align:left;font-weight:800;}}
+          .budget-table-first{{position:sticky;left:0;z-index:3;text-align:left;font-weight:800;background:#fff!important;box-shadow:2px 0 0 rgba(148,163,184,.18);}}
+          .budget-comparison-table tr:nth-child(even) .budget-table-first{{background:#fbfdff!important;}}
           .budget-table-num{{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}}
           .budget-table-status{{text-align:center;}}
           .budget-module-link{{display:inline;color:#1d4ed8;font-weight:850;text-decoration:none;border-bottom:1px solid rgba(29,78,216,.35);}}
@@ -10102,6 +12589,7 @@ def _render_budget_comparison_table(
           .budget-status-ok{{background:#ecfdf3;color:#027a48;}}
           .budget-status-lag{{background:#fff1f0;color:#d92d20;}}
           .budget-total-row td{{font-weight:900;background:#f3f7ff!important;border-top:2px solid #c9d7e8;}}
+          .budget-total-row .budget-table-first{{background:#f3f7ff!important;}}
         </style>
         <div class="budget-table-toolbar"><span class="budget-unit-note">单位：万元</span></div>
         <div class="budget-table-scroll">
@@ -10123,9 +12611,48 @@ def _render_budget_comparison_table(
 def _budget_policy_note(progress: float) -> str:
     return (
         f"说明：全年预算按 100% 计算；月进度 = 月份 / 12；当前时间进度为 {progress * 100:.2f}%；"
-        "收入、利润完成率分别对比时间进度；平均完成度为有效经营单位完成率平均值；"
-        "负利润预算按进度目标判断，避免亏损扩大被误判为超前。"
+        "实际数来源为收入成本费用表本年累计；模块/集团按当前范围抵消内部管理服务费；"
+        "收入、利润完成率分别对比时间进度；平均完成度仅统计正预算且有实际数的经营单位；"
+        "负利润预算按减亏进度单独判断，避免亏损扩大被误判为超前。"
     )
+
+
+def _budget_module_bridge(detail_df: pd.DataFrame, module_name: str) -> dict:
+    if detail_df is None or detail_df.empty:
+        return {}
+    context = detail_df.attrs.get("budget_internal_adjustments", {}) if hasattr(detail_df, "attrs") else {}
+    if not isinstance(context, dict) or not context:
+        return {}
+    module = _budget_text(module_name)
+    module_rows = detail_df[detail_df["module"].astype(str) == module].copy() if "module" in detail_df.columns else pd.DataFrame()
+    raw_income = _safe_float(pd.to_numeric(module_rows.get("收入实际", pd.Series(dtype=float)), errors="coerce").fillna(0.0).sum())
+    raw_profit = _safe_float(pd.to_numeric(module_rows.get("利润实际", pd.Series(dtype=float)), errors="coerce").fillna(0.0).sum())
+    adjustment = _safe_float((context.get("module_adjustments") or {}).get(module))
+    if module == "合计":
+        adjustment = _safe_float(context.get("total_adjustment"))
+    if abs(adjustment) <= 1e-9:
+        return {}
+    return {
+        "raw_income": raw_income,
+        "income_adjustment": adjustment,
+        "adjusted_income": raw_income - adjustment,
+        "raw_profit": raw_profit,
+        "adjusted_profit": raw_profit,
+    }
+
+
+def _budget_bridge_note_html(module_name: str, bridge: dict) -> str:
+    if not bridge:
+        return ""
+    return f"""
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0 12px;padding:10px 12px;border:1px solid #dbe5f2;border-radius:10px;background:#f8fbff;color:#334155;font-size:12px;font-weight:750;">
+      <span>{_html(module_name)}主表采用合并口径；下钻为单体原始本年累计。</span>
+      <span>单体收入合计 <b>{_html(_fmt_budget_wan(bridge.get("raw_income")))}</b></span>
+      <span>减内部抵消 <b>{_html(_fmt_budget_wan(bridge.get("income_adjustment")))}</b></span>
+      <span>主表收入 <b>{_html(_fmt_budget_wan(bridge.get("adjusted_income")))}</b></span>
+      <span>纯内部交易收入和成本同步抵消，利润 <b>{_html(_fmt_budget_wan(bridge.get("adjusted_profit")))}</b></span>
+    </div>
+    """
 
 
 def _budget_quality_center_drilldown_view(
@@ -10228,11 +12755,14 @@ def _budget_drill_table_html(
         body_rows.append(f"<tr>{''.join(cells)}</tr>")
     return f"""
     <style>
-      .budget-drill-wrap{{margin-top:10px;overflow-x:auto;}}
+      .budget-drill-wrap{{margin-top:10px;overflow:auto;max-height:64vh;}}
       .budget-drill-unit{{display:block;text-align:right;font-size:12px;font-weight:750;color:#64748b;margin-bottom:6px;}}
       .budget-drill-table{{width:100%;min-width:760px;border-collapse:collapse;background:#fff;border:1px solid #dbe5f2;border-radius:10px;overflow:hidden;}}
-      .budget-drill-table th{{background:#edf4ff;color:#10233f;font-size:13px;font-weight:850;text-align:center;padding:9px 10px;border:1px solid #dbe5f2;white-space:nowrap;}}
+      .budget-drill-table th{{position:sticky;top:0;z-index:4;background:#edf4ff;color:#10233f;font-size:13px;font-weight:850;text-align:center;padding:9px 10px;border:1px solid #dbe5f2;white-space:nowrap;}}
+      .budget-drill-table th:first-child{{left:0;z-index:7;box-shadow:2px 0 0 rgba(148,163,184,.24);}}
       .budget-drill-table td{{font-size:13px;padding:9px 10px;border:1px solid #e4ebf5;}}
+      .budget-drill-table td:first-child{{position:sticky;left:0;z-index:3;background:#fff;box-shadow:2px 0 0 rgba(148,163,184,.18);}}
+      .budget-drill-table tr:nth-child(even) td:first-child{{background:#fbfdff;}}
       .budget-drill-text{{color:#10233f;text-align:left;font-weight:700;}}
       .budget-drill-num{{color:#10233f;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}}
       .budget-drill-center{{text-align:center;}}
@@ -10289,6 +12819,9 @@ def show_budget_drilldown_dialog(
             gap = completion - progress if not isinstance(completion, str) else None
             status = _budget_single_status(gap) if gap is not None else "待匹配"
             _render_html(_budget_drill_summary_html("校区收入目标", total_budget, total_actual if len(matched_display) else "待匹配", completion, progress, status))
+            bridge_html = _budget_bridge_note_html(module_name, _budget_module_bridge(detail_df, module_name))
+            if bridge_html:
+                _render_html(bridge_html)
             _render_html(
                 _budget_drill_table_html(
                     display,
@@ -10312,6 +12845,9 @@ def show_budget_drilldown_dialog(
     total_actual = _safe_float(pd.to_numeric(drill_df.get("收入实际", pd.Series(dtype=float)), errors="coerce").fillna(0.0).sum())
     completion, gap = _budget_metric_progress(total_actual, total_budget, progress, "income")
     _render_html(_budget_drill_summary_html("公司收入进度", total_budget, total_actual, completion, progress, _budget_single_status(gap)))
+    bridge_html = _budget_bridge_note_html(module_name, _budget_module_bridge(detail_df, module_name))
+    if bridge_html:
+        _render_html(bridge_html)
     _render_html(
         _budget_drill_table_html(
             detail_view,
@@ -10444,6 +12980,9 @@ def render_cashflow():
             else:
                 st.toast("未生成数据", icon="⚠️")
 
+DETAIL_QUERY_HTML_ROW_LIMIT = 1000
+
+
 def render_detail_tables():
     st.markdown('<div class="page-header">📑 明细表查询</div>', unsafe_allow_html=True)
     table_type = st.selectbox("选择明细表类型", ["损益明细表", "收入人次表", "非学科费用分配表", "管理中心部门收入成本费用表", "非学科课酬表"])
@@ -10467,9 +13006,98 @@ def render_detail_tables():
                 for c in df.select_dtypes(include=['float64', 'int64']).columns:
                     if c not in ["期间", "人次", "课时"]:
                         config[c] = st.column_config.NumberColumn(c, format="%,.2f")
-                st.dataframe(df, use_container_width=True, hide_index=True, height=500, column_config=config)
+                _render_detail_query_result(df, config, table_type, sel_company or None, sel_period)
             else:
                 st.toast("未查询到数据", icon="⚠️")
+
+
+def _detail_query_download_filename(table_type: str, company_code: str | None, period: str | None) -> str:
+    parts = [str(table_type or "明细表查询")]
+    if company_code:
+        parts.append(str(company_code))
+    if period:
+        parts.append(str(period))
+    raw = "_".join(parts)
+    safe = re.sub(r"[^\w\u4e00-\u9fff.-]+", "_", raw).strip("_")
+    return f"{safe or '明细表查询'}.csv"
+
+
+def _render_detail_query_result(
+    df: pd.DataFrame,
+    column_config: dict | None = None,
+    table_type: str = "",
+    company_code: str | None = None,
+    period: str | None = None,
+) -> None:
+    if len(df) > DETAIL_QUERY_HTML_ROW_LIMIT:
+        st.warning(
+            f"本次查询返回 {len(df):,} 行，已启用大结果集保护：完整结果用原生表格展示，"
+            f"避免一次性生成过大的 HTML；如需冻结首列预览，请选择公司或期间缩小到 {DETAIL_QUERY_HTML_ROW_LIMIT:,} 行以内。"
+        )
+        download_name = _detail_query_download_filename(table_type, company_code, period)
+        st.download_button(
+            "导出完整查询结果 CSV",
+            data=df.to_csv(index=False).encode("utf-8-sig"),
+            file_name=download_name,
+            mime="text/csv",
+            use_container_width=True,
+            key=f"detail_query_export_{download_name}_{len(df)}",
+        )
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            height=520,
+            column_config=column_config or {},
+        )
+        return
+    st.markdown(_detail_query_table_html(df), unsafe_allow_html=True)
+
+
+def _detail_query_table_html(df: pd.DataFrame) -> str:
+    if df is None or df.empty:
+        return '<div class="detail-query-empty">暂无明细数据。</div>'
+    numeric_cols = set(df.select_dtypes(include=["float64", "int64", "int32", "float32"]).columns)
+    min_width = max(920, len(df.columns) * 138)
+    header_html = "".join(f"<th>{_html(column)}</th>" for column in df.columns)
+    body_rows = []
+    for record in df.to_dict("records"):
+        cells = []
+        for column in df.columns:
+            value = record.get(column)
+            is_numeric = column in numeric_cols and pd.notna(value)
+            if is_numeric:
+                try:
+                    display = f"{float(value):,.2f}"
+                except (TypeError, ValueError):
+                    display = str(value)
+                cls = "detail-query-num"
+            else:
+                display = "" if pd.isna(value) else str(value)
+                cls = "detail-query-text"
+            cells.append(f'<td class="{cls}" title="{_html(display)}">{_html(display)}</td>')
+        body_rows.append(f"<tr>{''.join(cells)}</tr>")
+    return f"""
+    <style>
+      .detail-query-table-wrap{{width:100%;overflow:auto;max-height:70vh;border:1px solid #dbe5f2;border-radius:8px;background:#fff;}}
+      .detail-query-table{{width:100%;min-width:{min_width}px;border-collapse:collapse;table-layout:fixed;color:#10233f;font-size:13px;}}
+      .detail-query-table th,.detail-query-table td{{border:1px solid #dbe5f2;padding:8px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle;}}
+      .detail-query-table th{{position:sticky;top:0;z-index:4;background:#eaf2ff;color:#10233f;text-align:center;font-weight:850;}}
+      .detail-query-table th:first-child{{left:0;z-index:7;box-shadow:2px 0 0 rgba(148,163,184,.24);}}
+      .detail-query-table td:first-child{{position:sticky;left:0;z-index:3;background:#fff;box-shadow:2px 0 0 rgba(148,163,184,.18);}}
+      .detail-query-table tr:nth-child(even) td{{background:#fbfdff;}}
+      .detail-query-table tr:nth-child(even) td:first-child{{background:#fbfdff;}}
+      .detail-query-num{{text-align:right;font-variant-numeric:tabular-nums;}}
+      .detail-query-text{{text-align:center;}}
+      .detail-query-empty{{padding:14px;border:1px dashed #cbd5e1;border-radius:8px;color:#64748b;background:#fff;}}
+    </style>
+    <div class="detail-query-table-wrap">
+      <table class="detail-query-table">
+        <thead><tr>{header_html}</tr></thead>
+        <tbody>{''.join(body_rows)}</tbody>
+      </table>
+    </div>
+    """
 
 def _render_structure_table(df: pd.DataFrame, external: bool = False) -> None:
     display = df.copy()

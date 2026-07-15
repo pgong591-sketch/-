@@ -422,6 +422,10 @@ def test_profit_original_table_html_is_fixed_8_columns_without_colgroup():
             f"{{width:{width}%;}}"
         ) in css
     assert sum(expected_widths) == 100
+    assert ".profit-original-table-scroll{max-height:70vh;overflow:auto;background:#fff;}" in css
+    assert ".profit-original-table th{\n        position:sticky;top:0;z-index:4;" in css
+    assert ".profit-original-table th:first-child{z-index:7;" in css
+    assert ".profit-original-table td:first-child{z-index:3;" in css
 
 
 def test_profit_original_table_html_uses_ytd_total_column_value():

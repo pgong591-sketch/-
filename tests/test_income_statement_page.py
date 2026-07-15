@@ -310,6 +310,19 @@ def test_income_statement_html_keeps_item_text_visible():
     assert "word-break:break-word" in html
 
 
+def test_income_statement_html_freezes_header_and_project_column():
+    display = pd.DataFrame(
+        [{"项目": "一、营业收入", "公司A": "1,234.00"}]
+    )
+
+    html = app._income_statement_table_html(display)
+
+    assert ".income-statement-scroll{overflow:auto;width:100%;max-height:70vh;}" in html
+    assert ".income-statement-table th{position:sticky;top:0;z-index:4" in html
+    assert ".income-statement-table th:first-child{left:0;z-index:7" in html
+    assert ".income-statement-table .item-cell{position:sticky;left:0;z-index:3" in html
+
+
 def test_income_statement_export_pivot_exists_and_writes_file(tmp_path):
     display = pd.DataFrame(
         [

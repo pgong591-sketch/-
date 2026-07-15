@@ -1,9 +1,15 @@
 #!/bin/zsh
 set -e
 
+export LANG="${LANG:-en_US.UTF-8}"
+export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+export LC_CTYPE="${LC_CTYPE:-en_US.UTF-8}"
+ORIGINAL_PATH="${PATH:-/usr/bin:/bin:/usr/sbin:/sbin}"
+export PATH="/opt/homebrew/bin:/usr/local/bin:${ORIGINAL_PATH}:/usr/bin:/bin:/usr/sbin:/sbin"
+
 cd "$(dirname "$0")"
 
-PROJECT_DIR="$(pwd)"
+PROJECT_DIR="$(pwd -P)"
 PID_FILE="data/streamlit_desktop_8502.pid"
 LOG_FILE="data/streamlit_desktop.log"
 URL="http://localhost:8502"
@@ -22,24 +28,83 @@ report_launch_error() {
   fi
 }
 
+canonical_path() {
+  python3 - "$1" <<'PY'
+import pathlib
+import sys
+
+if len(sys.argv) < 2 or not sys.argv[1]:
+    raise SystemExit(1)
+print(pathlib.Path(sys.argv[1]).resolve())
+PY
+}
+
+decode_lsof_path() {
+  python3 - "$1" <<'PY'
+import codecs
+import re
+import sys
+
+value = sys.argv[1]
+try:
+    if "\\x" in value or re.search(r"\\[0-7]{3}", value):
+        value = codecs.decode(value, "unicode_escape").encode("latin1").decode("utf-8")
+except Exception:
+    pass
+print(value)
+PY
+}
+
+process_command_line() {
+  python3 - "$1" <<'PY' 2>/dev/null || ps -p "$1" -o command= 2>/dev/null || true
+import ctypes
+import ctypes.util
+import os
+import shlex
+import sys
+
+pid = int(sys.argv[1])
+libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+mib = (ctypes.c_int * 3)(1, 49, pid)
+size = ctypes.c_size_t(8192)
+buf = ctypes.create_string_buffer(size.value)
+if libc.sysctl(mib, 3, buf, ctypes.byref(size), None, 0) != 0:
+    raise SystemExit(1)
+data = buf.raw[: size.value]
+argc = int.from_bytes(data[:4], sys.byteorder)
+parts = [part.decode("utf-8", "replace") for part in data[4:].split(b"\x00") if part]
+argv = parts[1 : 1 + argc]
+if not argv:
+    raise SystemExit(1)
+print(" ".join(shlex.quote(arg) for arg in argv))
+PY
+}
+
 is_current_project_streamlit() {
   local pid="$1"
   local command_line
+  local cwd_raw
   local cwd_path
+  local cwd_canonical
   local port_pid
 
-  if ! ps -p "$pid" >/dev/null 2>&1; then
+  if ! lsof -p "$pid" >/dev/null 2>&1; then
     return 1
   fi
 
-  command_line="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-  cwd_path="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1 || true)"
+  command_line="$(process_command_line "$pid")"
+  cwd_raw="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1 || true)"
+  [[ -n "$cwd_raw" ]] || return 1
+  cwd_path="$(decode_lsof_path "$cwd_raw")"
+  [[ -n "$cwd_path" ]] || return 1
+  cwd_canonical="$(canonical_path "$cwd_path" 2>/dev/null || true)"
+  [[ -n "$cwd_canonical" ]] || cwd_canonical="$cwd_path"
   port_pid="$(lsof -nP -iTCP:8502 -sTCP:LISTEN -Fp 2>/dev/null | sed -n 's/^p//p' | head -n 1 || true)"
 
   [[ "$command_line" == *"streamlit"* ]] || return 1
   [[ "$command_line" == *"app.py"* ]] || return 1
   [[ "$command_line" == *"8502"* ]] || return 1
-  [[ "$cwd_path" == "$PROJECT_DIR" ]] || return 1
+  [[ "$cwd_canonical" == "$PROJECT_DIR" ]] || return 1
   [[ "$port_pid" == "$pid" ]] || return 1
 }
 

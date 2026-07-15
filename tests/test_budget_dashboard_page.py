@@ -1,4 +1,5 @@
 from pathlib import Path
+import inspect
 
 import pandas as pd
 from openpyxl import Workbook
@@ -93,6 +94,256 @@ def test_budget_overview_compares_completion_with_time_progress(tmp_path):
     assert drill["收入实际"] == 300.0
 
 
+def test_budget_overview_applies_internal_adjustment_to_module_and_total_only():
+    plan = pd.DataFrame(
+        [
+            {"module": "东莞素质中心", "unit_name": "东莞素质中心", "income_budget": 1000.0, "profit_budget": 100.0, "budget_level": "module"},
+            {"module": "管理中心", "unit_name": "管理中心", "income_budget": 500.0, "profit_budget": 50.0, "budget_level": "module"},
+            {"module": "合计", "unit_name": "合计", "income_budget": 1500.0, "profit_budget": 150.0, "budget_level": "module"},
+        ]
+    )
+    actual = pd.DataFrame(
+        [
+            {"module": "东莞素质中心", "unit_name": "莞城小学部", "company_code": "101010120", "income_actual": 300.0, "profit_actual": 60.0},
+            {"module": "管理中心", "unit_name": "管理中心", "company_code": "101", "income_actual": 50.0, "profit_actual": -20.0},
+        ]
+    )
+    actual.attrs["budget_internal_adjustments"] = {
+        "module_adjustments": {"东莞素质中心": 40.0},
+        "total_adjustment": 70.0,
+    }
+
+    overview, detail = app.build_budget_completion_data(plan, actual, "03")
+
+    quality = overview.loc[overview["模块名称"] == "东莞素质中心"].iloc[0]
+    total = overview.loc[overview["模块名称"] == "合计"].iloc[0]
+    drill = detail.loc[detail["公司名称"] == "莞城小学部"].iloc[0]
+    assert quality["收入实际"] == 260.0
+    assert quality["利润实际"] == 60.0
+    assert total["收入实际"] == 280.0
+    assert total["利润实际"] == 40.0
+    assert drill["收入实际"] == 300.0
+
+
+def test_budget_completion_filters_pseudo_detail_rows_and_keeps_single_total():
+    plan = pd.DataFrame(
+        [
+            {"module": "青少年宫", "unit_name": "青少年宫", "income_budget": 100.0, "profit_budget": 10.0, "budget_level": "module"},
+            {"module": "青少年宫", "unit_name": "真实未分组公司", "income_budget": 20.0, "profit_budget": 2.0, "budget_level": "unit"},
+            {"module": "青少年宫", "unit_name": "合计", "income_budget": 999.0, "profit_budget": 999.0, "budget_level": "unit"},
+            {"module": "合并", "unit_name": "合并", "income_budget": 888.0, "profit_budget": 888.0, "budget_level": "module"},
+            {"module": "合计", "unit_name": "合计", "income_budget": 777.0, "profit_budget": 777.0, "budget_level": "module"},
+        ]
+    )
+    actual = pd.DataFrame(
+        [
+            {"module": "青少年宫", "unit_name": "真实未分组公司", "company_code": "1011801", "income_actual": 30.0, "profit_actual": 3.0},
+            {"module": "青少年宫", "unit_name": "合并", "company_code": "SUMMARY_10118", "income_actual": 999.0, "profit_actual": 999.0},
+            {"module": "SUMMARY_收入合计", "unit_name": "SUMMARY_收入合计", "company_code": "SUMMARY_ROW", "income_actual": 888.0, "profit_actual": 888.0},
+        ]
+    )
+
+    overview, detail = app.build_budget_completion_data(plan, actual, "03")
+
+    assert overview["模块名称"].tolist().count("合计") == 1
+    assert "合并" not in set(overview["模块名称"])
+    assert "合计" not in set(detail["公司名称"])
+    assert "合并" not in set(detail["公司名称"])
+    assert "真实未分组公司" in set(detail["公司名称"])
+    total = overview.loc[overview["模块名称"] == "合计"].iloc[0]
+    assert total["收入预算"] == 100.0
+    assert total["收入实际"] == 30.0
+
+
+def test_budget_bridge_note_explains_raw_drilldown_and_adjusted_main_value():
+    detail = pd.DataFrame(
+        [
+            {"module": "东莞素质中心", "公司名称": "莞城小学部", "收入实际": 300.0, "利润实际": 60.0},
+            {"module": "东莞素质中心", "公司名称": "万江校区", "收入实际": 200.0, "利润实际": 40.0},
+        ]
+    )
+    detail.attrs["budget_internal_adjustments"] = {
+        "module_adjustments": {"东莞素质中心": 50.0},
+        "total_adjustment": 50.0,
+    }
+
+    bridge = app._budget_module_bridge(detail, "东莞素质中心")
+    html = app._budget_bridge_note_html("东莞素质中心", bridge)
+
+    assert bridge["raw_income"] == 500.0
+    assert bridge["income_adjustment"] == 50.0
+    assert bridge["adjusted_income"] == 450.0
+    assert "下钻为单体原始本年累计" in html
+    assert "减内部抵消" in html
+
+
+def test_load_budget_actuals_uses_pl_detail_ytd_and_preferred_rows(monkeypatch):
+    queries: list[str] = []
+    rows = pd.DataFrame(
+        [
+            {"id": 1, "公司编码": "1011801", "company_code": "1011801", "item_code": "SUMMARY_收入合计", "item_name": app.PL_REVENUE_ITEM, "amount": 100.0, "ytd_amount": 100.0, "short_name": "莞城青少年宫", "company_name": "莞城青少年宫", "parent_code": "10118", "business_group": "", "公司": "莞城青少年宫"},
+            {"id": 2, "公司编码": "1011801", "company_code": "1011801", "item_code": "OPERATING_收入合计", "item_name": app.PL_REVENUE_ITEM, "amount": 120.0, "ytd_amount": 120.0, "short_name": "莞城青少年宫", "company_name": "莞城青少年宫", "parent_code": "10118", "business_group": "", "公司": "莞城青少年宫"},
+            {"id": 3, "公司编码": "1011801", "company_code": "1011801", "item_code": "5401", "item_name": app.PL_REVENUE_ITEM, "amount": 999.0, "ytd_amount": 999.0, "short_name": "莞城青少年宫", "company_name": "莞城青少年宫", "parent_code": "10118", "business_group": "", "公司": "莞城青少年宫"},
+            {"id": 4, "公司编码": "1011801", "company_code": "1011801", "item_code": "OPERATING_净利润", "item_name": app.PL_NET_PROFIT_ITEM, "amount": 30.0, "ytd_amount": 30.0, "short_name": "莞城青少年宫", "company_name": "莞城青少年宫", "parent_code": "10118", "business_group": "", "公司": "莞城青少年宫"},
+            {"id": 5, "公司编码": "1011801", "company_code": "1011801", "item_code": "OPERATING_成本费用合计", "item_name": app.PL_COST_TOTAL_ITEM, "amount": 90.0, "ytd_amount": 90.0, "short_name": "莞城青少年宫", "company_name": "莞城青少年宫", "parent_code": "10118", "business_group": "", "公司": "莞城青少年宫"},
+        ]
+    )
+
+    def fake_execute_sql(sql, params=None):
+        queries.append(sql)
+        return rows.copy()
+
+    monkeypatch.setattr(app, "execute_sql", fake_execute_sql)
+    monkeypatch.setattr(app, "get_consolidation_company_codes", lambda code: {"10118": ["1011801"]}.get(str(code), [str(code)]))
+
+    actual = app.load_budget_actuals("202603")
+
+    assert all("income_statement" not in query for query in queries)
+    assert "COALESCE(d.ytd_amount, 0) AS amount" in inspect.getsource(app._budget_pl_detail_ytd_source_rows)
+    row = actual.iloc[0]
+    assert row["income_actual"] == 120.0
+    assert row["profit_actual"] == 30.0
+
+
+def test_budget_ytd_internal_fee_split_does_not_assign_unmatched_residual_to_101(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "get_consolidation_company_codes",
+        lambda code: {
+            "10101": ["10101", "1010101", "101010102"],
+            "10204": ["10204", "1020401"],
+        }.get(str(code), [str(code)]),
+    )
+    monkeypatch.setattr(app, "_operating_card_company_name_map", lambda codes: {str(code): str(code) for code in codes})
+    rows = pd.DataFrame(
+        [
+            {"id": 1, "company_code": "1010101", "公司": "东莞非学科管理中心", "item_code": "OPERATING_成本费用合计", "item_name": app.PL_COST_TOTAL_ITEM, "amount": 0.0},
+            {"id": 2, "company_code": "101010102", "公司": "华凯校区", "item_code": "560216", "item_name": app.HOME_MANAGEMENT_FEE_ITEM, "amount": 100.0},
+            {"id": 3, "company_code": "101010102", "公司": "华凯校区", "item_code": "540101", "item_name": app.HOME_MAIN_REVENUE_ITEM, "amount": 1000.0},
+            {"id": 4, "company_code": "1020401", "公司": "莞城书馆", "item_code": "560216", "item_name": app.HOME_MANAGEMENT_FEE_ITEM, "amount": 30.0},
+            {"id": 5, "company_code": "1020401", "公司": "莞城书馆", "item_code": "540101", "item_name": app.HOME_MAIN_REVENUE_ITEM, "amount": 300.0},
+            {"id": 6, "company_code": "10204", "公司": "书馆管理中心", "item_code": "540101", "item_name": app.HOME_MAIN_REVENUE_ITEM, "amount": 0.0},
+            {"id": 7, "company_code": "1011801", "公司": "青少年宫", "item_code": "560216", "item_name": app.HOME_MANAGEMENT_FEE_ITEM, "amount": 5.0},
+            {"id": 8, "company_code": "1011801", "公司": "青少年宫", "item_code": "540101", "item_name": app.HOME_MAIN_REVENUE_ITEM, "amount": 50.0},
+        ]
+    )
+    metrics = app._operating_card_company_metrics_from_source(rows)
+
+    split = app._operating_card_internal_fee_split(
+        rows,
+        metrics,
+        ["1010101", "101010102", "10204", "1020401", "1011801"],
+        assign_residual_to_management=False,
+    )
+
+    assert split["non_subject_fee"].get("101010102", 0.0) == 0.0
+    assert split["non_subject_unmatched_fee"]["101010102"] == 100.0
+    assert split["unmatched_eryu_fee"]["1020401"] == 30.0
+    assert split["management_fee"].get("101010102", 0.0) == 0.0
+    assert split["management_fee"].get("1020401", 0.0) == 0.0
+    assert split["management_fee"]["1011801"] == 5.0
+
+
+def test_budget_ytd_scope_only_offsets_when_payer_and_receiver_are_in_scope(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "get_consolidation_company_codes",
+        lambda code: {
+            "10101": ["10101", "1010101", "101010102"],
+            "10204": ["10204", "1020401"],
+            "10118": ["10118", "1011801"],
+        }.get(str(code), [str(code)]),
+    )
+    monkeypatch.setattr(app, "_operating_card_company_name_map", lambda codes: {str(code): str(code) for code in codes})
+    rows = pd.DataFrame(
+        [
+            {"company_code": "101010102", "公司": "华凯校区", "item_code": "OPERATING_收入合计", "item_name": app.PL_REVENUE_ITEM, "amount": 1_080_082.99},
+            {"company_code": "101010102", "公司": "华凯校区", "item_code": "OPERATING_净利润", "item_name": app.PL_NET_PROFIT_ITEM, "amount": 100_000.0},
+            {"company_code": "101010102", "公司": "华凯校区", "item_code": "540101", "item_name": app.HOME_MAIN_REVENUE_ITEM, "amount": 1_080_082.99},
+            {"company_code": "101010102", "公司": "华凯校区", "item_code": "560216", "item_name": app.HOME_MANAGEMENT_FEE_ITEM, "amount": 88_679.98},
+            {"company_code": "1010101", "公司": "东莞非学科管理中心", "item_code": "OPERATING_收入合计", "item_name": app.PL_REVENUE_ITEM, "amount": 0.0},
+            {"company_code": "1010101", "公司": "东莞非学科管理中心", "item_code": "OPERATING_净利润", "item_name": app.PL_NET_PROFIT_ITEM, "amount": 0.0},
+            {"company_code": "1010101", "公司": "东莞非学科管理中心", "item_code": "OPERATING_成本费用合计", "item_name": app.PL_COST_TOTAL_ITEM, "amount": 0.0},
+            {"company_code": "1020401", "公司": "莞城书馆", "item_code": "OPERATING_收入合计", "item_name": app.PL_REVENUE_ITEM, "amount": 2_148_024.47},
+            {"company_code": "1020401", "公司": "莞城书馆", "item_code": "OPERATING_净利润", "item_name": app.PL_NET_PROFIT_ITEM, "amount": 200_000.0},
+            {"company_code": "1020401", "公司": "莞城书馆", "item_code": "540101", "item_name": app.HOME_MAIN_REVENUE_ITEM, "amount": 2_148_024.47},
+            {"company_code": "1020401", "公司": "莞城书馆", "item_code": "560216", "item_name": app.HOME_MANAGEMENT_FEE_ITEM, "amount": 198_641.78},
+            {"company_code": "10204", "公司": "书馆管理中心", "item_code": "OPERATING_收入合计", "item_name": app.PL_REVENUE_ITEM, "amount": 0.0},
+            {"company_code": "10204", "公司": "书馆管理中心", "item_code": "OPERATING_净利润", "item_name": app.PL_NET_PROFIT_ITEM, "amount": 0.0},
+            {"company_code": "10204", "公司": "书馆管理中心", "item_code": "540101", "item_name": app.HOME_MAIN_REVENUE_ITEM, "amount": 0.0},
+            {"company_code": "1011801", "公司": "青少年宫", "item_code": "OPERATING_收入合计", "item_name": app.PL_REVENUE_ITEM, "amount": 703_698.77},
+            {"company_code": "1011801", "公司": "青少年宫", "item_code": "OPERATING_净利润", "item_name": app.PL_NET_PROFIT_ITEM, "amount": 70_000.0},
+            {"company_code": "1011801", "公司": "青少年宫", "item_code": "540101", "item_name": app.HOME_MAIN_REVENUE_ITEM, "amount": 703_698.77},
+        ]
+    )
+
+    def fake_source_rows(period, company_codes=None):
+        result = rows.copy()
+        if company_codes is not None:
+            wanted = {str(code) for code in company_codes}
+            result = result[result["company_code"].astype(str).isin(wanted)].copy()
+        for column, default in {
+            "id": 1,
+            "公司编码": "",
+            "ytd_amount": 0.0,
+            "short_name": "",
+            "company_name": "",
+            "parent_code": "",
+            "business_group": "",
+        }.items():
+            if column not in result.columns:
+                result[column] = default
+        result["公司编码"] = result["company_code"]
+        result["ytd_amount"] = result["amount"]
+        result["short_name"] = result["公司"]
+        result["company_name"] = result["公司"]
+        return result
+
+    def scoped_income(codes: list[str]) -> tuple[float, dict]:
+        actual_rows = []
+        source = fake_source_rows("202603", codes)
+        metrics = app._operating_card_company_metrics_from_source(source)
+        for row in metrics.to_dict("records"):
+            actual_rows.append(
+                {
+                    "module": app._budget_module_for_actual_company(row["company_code"], row["公司"]),
+                    "unit_name": row["公司"],
+                    "company_code": row["company_code"],
+                    "income_actual": row["收入"],
+                    "profit_actual": row["净利润"],
+                }
+            )
+        actual = pd.DataFrame(actual_rows, columns=app._budget_empty_actual_frame().columns)
+        monkeypatch.setattr(app, "_budget_pl_detail_ytd_source_rows", fake_source_rows)
+        actual = app._budget_attach_internal_adjustments(actual, "202603")
+        plan = pd.DataFrame(
+            [
+                {"module": "东莞素质中心", "unit_name": "东莞素质中心", "income_budget": 9_999_999.0, "profit_budget": 1.0, "budget_level": "module"},
+                {"module": "尔遇书馆", "unit_name": "尔遇书馆", "income_budget": 9_999_999.0, "profit_budget": 1.0, "budget_level": "module"},
+                {"module": "青少年宫", "unit_name": "青少年宫", "income_budget": 9_999_999.0, "profit_budget": 1.0, "budget_level": "module"},
+                {"module": "合计", "unit_name": "合计", "income_budget": 9_999_999.0, "profit_budget": 1.0, "budget_level": "module"},
+            ]
+        )
+        overview, _ = app.build_budget_completion_data(plan, actual, "03")
+        return (
+            app._safe_float(overview.loc[overview["模块名称"] == "合计", "收入实际"].iloc[0]),
+            actual.attrs["budget_internal_adjustments"],
+        )
+
+    assert round(scoped_income(["101010102"])[0], 2) == 1_080_082.99
+    assert round(scoped_income(["1020401"])[0], 2) == 2_148_024.47
+    assert round(scoped_income(["1011801"])[0], 2) == 703_698.77
+    assert round(scoped_income(["1010101"])[0], 2) == 0.0
+    assert round(scoped_income(["10204"])[0], 2) == 0.0
+
+    non_subject_income, non_subject_context = scoped_income(["101010102", "1010101"])
+    eryu_income, eryu_context = scoped_income(["1020401", "10204"])
+    assert round(non_subject_income, 2) == 991_403.01
+    assert round(non_subject_context["total_adjustment"], 2) == 88_679.98
+    assert round(eryu_income, 2) == 1_949_382.69
+    assert round(eryu_context["total_adjustment"], 2) == 198_641.78
+
+
 def test_module_budget_rows_backfill_single_actual_drilldown():
     plan = pd.DataFrame(
         [
@@ -128,6 +379,41 @@ def test_module_budget_rows_backfill_single_actual_drilldown():
         assert view["公司名称"].iloc[0] == name
         assert view["收入预算"].iloc[0] == income_budget
         assert view["收入实际"].iloc[0] > 0
+
+
+def test_budget_actuals_drop_stale_parent_duplicate_before_drilldown():
+    actual = pd.DataFrame(
+        [
+            {
+                "module": "新阳光幼儿园",
+                "unit_name": "幼儿园",
+                "company_code": "10107",
+                "parent_code": "101",
+                "income_actual": 120.0,
+                "profit_actual": -12.0,
+            },
+            {
+                "module": "新阳光幼儿园",
+                "unit_name": "东莞市茶山新阳光幼儿园",
+                "company_code": "1010702",
+                "parent_code": "10107",
+                "income_actual": 120.0,
+                "profit_actual": -12.0,
+            },
+            {
+                "module": "托育项目",
+                "unit_name": "茶山托育项目",
+                "company_code": "1010703",
+                "parent_code": "10107",
+                "income_actual": 80.0,
+                "profit_actual": -8.0,
+            },
+        ]
+    )
+
+    pruned = app._budget_prune_stale_parent_actuals(actual)
+
+    assert pruned["company_code"].tolist() == ["1010702", "1010703"]
 
 
 def test_module_budget_only_drilldown_uses_pending_actual_not_zero():
@@ -307,18 +593,37 @@ def test_budget_kpi_cards_render_final_two_card_dashboard(tmp_path):
 def test_budget_kpi_cards_show_average_completion_excluding_total_and_missing_values():
     overview = pd.DataFrame(
         [
-            {"模块名称": "东莞素质中心", "收入完成率": 0.2, "利润完成率": 0.6},
-            {"模块名称": "管理中心", "收入完成率": 0.4, "利润完成率": None},
-            {"模块名称": "合计", "收入完成率": 9.9, "利润完成率": 9.9},
+            {"模块名称": "东莞素质中心", "收入预算": 100.0, "收入实际": 20.0, "收入完成率": 0.2, "利润预算": 10.0, "利润实际": 6.0, "利润完成率": 0.6, "状态": "正常"},
+            {"模块名称": "管理中心", "收入预算": 100.0, "收入实际": 40.0, "收入完成率": 0.4, "利润预算": -10.0, "利润实际": -4.0, "利润完成率": None, "状态": "滞后"},
+            {"模块名称": "无预算", "收入预算": 0.0, "收入实际": 10.0, "收入完成率": None, "利润预算": 0.0, "利润实际": 1.0, "利润完成率": None, "状态": "暂无预算"},
+            {"模块名称": "合计", "收入预算": 999.0, "收入实际": 999.0, "收入完成率": 9.9, "利润预算": 999.0, "利润实际": 999.0, "利润完成率": 9.9, "状态": "正常"},
         ]
     )
 
-    assert round(app._budget_average_completion(overview), 4) == 0.4
+    assert round(app._budget_average_completion(overview, "income"), 4) == 0.3
+    assert round(app._budget_average_completion(overview, "profit"), 4) == 0.6
 
     html = app._budget_kpi_cards_html(overview, "03", app.budget_time_progress("03"))
 
     assert "时间进度 25.0% · 平均完成度" in html
-    assert "40.0%" in html
+    assert "30.0%" in html
+    assert "60.0%" in html
+
+
+def test_budget_profit_average_completion_shows_no_comparable_units():
+    overview = pd.DataFrame(
+        [
+            {"模块名称": "亏损预算", "收入预算": 100.0, "收入实际": 30.0, "收入完成率": 0.3, "利润预算": -10.0, "利润实际": -2.0, "利润完成率": None, "状态": "正常"},
+            {"模块名称": "零利润预算", "收入预算": 50.0, "收入实际": 10.0, "收入完成率": 0.2, "利润预算": 0.0, "利润实际": 1.0, "利润完成率": None, "状态": "暂无预算"},
+            {"模块名称": "合计", "收入预算": 150.0, "收入实际": 40.0, "收入完成率": 0.27, "利润预算": -10.0, "利润实际": -1.0, "利润完成率": None, "状态": "正常"},
+        ]
+    )
+
+    assert app._budget_average_completion(overview, "profit") is None
+
+    html = app._budget_kpi_cards_html(overview, "03", app.budget_time_progress("03"))
+
+    assert "暂无可比单位" in html
 
 
 def test_budget_comparison_view_matches_target_columns(tmp_path):
@@ -433,14 +738,15 @@ def test_quality_center_confirmed_mappings_and_special_statuses():
 
     assert matched.loc[matched["campus_name"] == "南城虎翼营", "actual_name"].iloc[0] == "南城虎翼"
     assert matched.loc[matched["campus_name"] == "茶山校区", "actual_name"].iloc[0] == "茶山学前"
-    assert matched.loc[matched["campus_name"] == "华凯校区", "actual_name"].iloc[0] == "南城"
-    assert set(matched["match_status"]) == {"已匹配", "待开业", "已取消"}
-    assert view.loc[view["校区名称"] == "华凯校区", "实际收入"].iloc[0] == 33000.0
+    assert matched.loc[matched["campus_name"] == "华凯校区", "match_status"].iloc[0] == "待确认"
+    assert "避免重复加总" in matched.loc[matched["campus_name"] == "华凯校区", "match_note"].iloc[0]
+    assert set(matched["match_status"]) == {"已匹配", "待确认", "待开业", "已取消"}
+    assert view.loc[view["校区名称"] == "华凯校区", "实际收入"].iloc[0] == "待确认"
     assert view.loc[view["校区名称"] == "松山湖校区", "实际收入"].iloc[0] == "待开业"
     assert view.loc[view["校区名称"] == "松山湖校区", "状态"].iloc[0] == "待开业"
     assert view.loc[view["校区名称"] == "产品中心直营校", "实际收入"].iloc[0] == "已取消"
     assert view.loc[view["校区名称"] == "产品中心直营校", "状态"].iloc[0] == "已取消"
-    assert issues.empty
+    assert issues["预算校区名称"].tolist() == ["华凯校区"]
 
 
 def test_budget_quality_center_mapping_comes_from_base_settings_service():
@@ -482,12 +788,31 @@ def test_budget_table_cells_have_alignment_lines_and_negative_styles():
     assert "border-right" in source
 
 
+def test_budget_main_and_drill_tables_have_sticky_header_and_first_column():
+    import inspect
+
+    main_source = inspect.getsource(app._render_budget_comparison_table)
+    drill_source = inspect.getsource(app._budget_drill_table_html)
+
+    assert ".budget-table-scroll" in main_source
+    assert "overflow:auto" in main_source
+    assert ".budget-comparison-table th{{position:sticky;top:0;z-index:4" in main_source
+    assert ".budget-comparison-table th:first-child{{left:0;z-index:7" in main_source
+    assert ".budget-table-first{{position:sticky;left:0;z-index:3" in main_source
+    assert ".budget-drill-wrap{{margin-top:10px;overflow:auto" in drill_source
+    assert ".budget-drill-table th{{position:sticky;top:0;z-index:4" in drill_source
+    assert ".budget-drill-table th:first-child{{left:0;z-index:7" in drill_source
+    assert ".budget-drill-table td:first-child{{position:sticky;left:0;z-index:3" in drill_source
+
+
 def test_budget_policy_note_is_compact_text_below_main_table():
     note = app._budget_policy_note(0.25)
 
     assert note.startswith("说明：")
     assert "当前时间进度为 25.00%" in note
-    assert "平均完成度为有效经营单位完成率平均值" in note
+    assert "实际数来源为收入成本费用表本年累计" in note
+    assert "平均完成度仅统计正预算且有实际数的经营单位" in note
+    assert "负利润预算按减亏进度单独判断" in note
 
 
 def test_budget_page_source_has_no_raw_card_html_leakage():
