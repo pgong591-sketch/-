@@ -110,12 +110,52 @@ def test_income_cost_expense_workbook_parses_operating_summary_source_rows():
 
     assert report_type == RT_INCOME_COST_EXPENSE
     assert info["errors"] == []
-    assert set(["company_code", "period", "item_code", "item_name", "category", "amount"]).issubset(df.columns)
+    assert set(["company_code", "period", "item_code", "item_name", "category", "amount", "ytd_amount"]).issubset(df.columns)
     assert df.iloc[0]["company_code"] == "101010136"
     assert df.iloc[0]["period"] == "202603"
     assert float(df.loc[df["item_name"] == "收入合计", "amount"].iloc[0]) == 60807.82
     assert float(df.loc[df["item_name"] == "成本费用合计", "amount"].iloc[0]) == 80808.13
     assert float(df.loc[df["item_name"] == "净利润", "amount"].iloc[0]) == -20000.31
+    assert float(df.loc[df["item_name"] == "收入合计", "ytd_amount"].iloc[0]) != 0
+
+    validation = validate_report_data(df, "pl_detail")
+    assert validation.is_valid
+
+
+def test_income_cost_expense_workbook_writes_structured_ytd_amount(tmp_path):
+    path = tmp_path / "202604南城华凯(K051)合并收入成本费用表.xlsx"
+    raw = pd.DataFrame(
+        [
+            ["收入成本费用表", "", "", ""],
+            ["单位:华凯校区 101010102", "", "", ""],
+            ["", "", "", ""],
+            ["科目代码", "科目", "4月", "本年累计"],
+            ["6001", "主营业务收入", 100.0, 400.0],
+            ["", "收入合计", 100.0, 400.0],
+            ["5401", "人工成本", -10.0, -25.0],
+            ["5402", "零值费用", 0.0, ""],
+            ["5403", "文本费用", "abc", "文本"],
+            ["", "成本费用合计", 30.0, 120.0],
+            ["", "净利润", 70.0, 280.0],
+        ]
+    )
+    raw.to_excel(path, header=False, index=False)
+
+    df, report_type, info = parse_file(str(path), original_filename=path.name)
+
+    assert report_type == RT_INCOME_COST_EXPENSE
+    assert info["errors"] == []
+    assert "ytd_amount" in df.columns
+    assert float(df.loc[df["item_name"] == "主营业务收入", "amount"].iloc[0]) == 100.0
+    assert float(df.loc[df["item_name"] == "主营业务收入", "ytd_amount"].iloc[0]) == 400.0
+    assert float(df.loc[df["item_name"] == "收入合计", "amount"].iloc[0]) == 100.0
+    assert float(df.loc[df["item_name"] == "收入合计", "ytd_amount"].iloc[0]) == 400.0
+    assert float(df.loc[df["item_name"] == "成本费用合计", "ytd_amount"].iloc[0]) == 120.0
+    assert float(df.loc[df["item_name"] == "净利润", "ytd_amount"].iloc[0]) == 280.0
+    assert float(df.loc[df["item_name"] == "人工成本", "amount"].iloc[0]) == -10.0
+    assert float(df.loc[df["item_name"] == "人工成本", "ytd_amount"].iloc[0]) == -25.0
+    assert "零值费用" not in set(df["item_name"])
+    assert "文本费用" not in set(df["item_name"])
 
     validation = validate_report_data(df, "pl_detail")
     assert validation.is_valid

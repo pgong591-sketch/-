@@ -98,6 +98,12 @@ from src.base_settings_service import (
     get_default_expanded_company_codes,
     resolve_company_identity,
 )
+from src.shared_name_mapping import (
+    SHARED_NAME_MAPPING_ENV,
+    build_shared_name_mapping_snapshot,
+    get_shared_name_mapping_path,
+    publish_shared_name_mapping_snapshot,
+)
 from src.filter_options_service import (
     apply_internal_management_fee_elimination,
     get_consolidation_company_codes,
@@ -1005,6 +1011,36 @@ PAGE_CSS = """
     .bi-kpi-trend.risk { color: #dc2626; font-weight: 700; }
     .bi-kpi-trend.neutral { color: #64748b; }
 
+    .home-top-kpi-grid .bi-kpi-card {
+        padding: 0.8rem 0.88rem;
+        min-height: 6.15rem;
+    }
+
+    .home-top-kpi-grid .bi-kpi-label {
+        font-size: 1.03rem;
+        line-height: 1.22;
+        font-weight: 680;
+    }
+
+    .home-top-kpi-grid .bi-kpi-value {
+        font-size: 2rem;
+        line-height: 1.08;
+        font-weight: 700;
+        margin-top: 0.34rem;
+    }
+
+    .home-top-kpi-grid .bi-kpi-delta {
+        font-size: 0.98rem;
+        line-height: 1.25;
+        margin-top: 0.38rem;
+    }
+
+    .home-top-kpi-grid .bi-kpi-trends {
+        font-size: 0.9rem;
+        line-height: 1.22;
+        margin-top: 0.34rem;
+    }
+
     .home-drill-panel-title {
         color: var(--text);
         font-size: 1.02rem;
@@ -1099,6 +1135,14 @@ PAGE_CSS = """
         padding: 0.12rem 0.48rem;
         background: #f8fbff;
         white-space: nowrap;
+    }
+
+    .home-detail-unit-note {
+        margin: 0 0 0.55rem;
+        color: #64748b;
+        font-size: 0.8rem;
+        line-height: 1.35;
+        text-align: right;
     }
 
     .home-detail-close {
@@ -1618,6 +1662,89 @@ PAGE_CSS = """
         line-height: 1.35 !important;
     }
 
+    .sidebar-font-control-title {
+        color: #e5eaf3 !important;
+        font-size: 0.82rem !important;
+        line-height: 1.25 !important;
+        font-weight: 760 !important;
+        margin: 0.78rem 0 0.42rem !important;
+        padding: 0 0.25rem !important;
+    }
+
+    [class*="st-key-ui_font_size_mode"] {
+        margin: 0 0 0.56rem !important;
+        padding: 0.48rem 0.5rem !important;
+        border-radius: 10px !important;
+        border: 1px solid rgba(255,255,255,0.10) !important;
+        background: rgba(255,255,255,0.05) !important;
+    }
+
+    [class*="st-key-ui_font_size_mode"] div[role="radiogroup"] {
+        display: grid !important;
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        gap: 0.25rem !important;
+        width: 100% !important;
+    }
+
+    [class*="st-key-ui_font_size_mode"] label {
+        min-height: 2rem !important;
+        margin: 0 !important;
+        padding: 0.16rem 0.24rem !important;
+        border-radius: 8px !important;
+        border: 1px solid rgba(255,255,255,0.10) !important;
+        background: rgba(15, 23, 42, 0.18) !important;
+        color: #d7e3f1 !important;
+        justify-content: center !important;
+    }
+
+    [class*="st-key-ui_font_size_mode"] label,
+    [class*="st-key-ui_font_size_mode"] label span,
+    [class*="st-key-ui_font_size_mode"] label div,
+    [class*="st-key-ui_font_size_mode"] label p {
+        color: #d7e3f1 !important;
+    }
+
+    [class*="st-key-ui_font_size_mode"] label:hover {
+        background: rgba(59,130,246,0.20) !important;
+        border-color: rgba(147,197,253,0.50) !important;
+        color: #ffffff !important;
+    }
+
+    [class*="st-key-ui_font_size_mode"] label:hover,
+    [class*="st-key-ui_font_size_mode"] label:hover span,
+    [class*="st-key-ui_font_size_mode"] label:hover div,
+    [class*="st-key-ui_font_size_mode"] label:hover p {
+        color: #ffffff !important;
+    }
+
+    [class*="st-key-ui_font_size_mode"] label:has(input:checked) {
+        background: #2563eb !important;
+        border-color: #60a5fa !important;
+        color: #ffffff !important;
+        box-shadow: 0 0 0 1px rgba(147,197,253,0.24) inset !important;
+    }
+
+    [class*="st-key-ui_font_size_mode"] label:has(input:checked),
+    [class*="st-key-ui_font_size_mode"] label:has(input:checked) span,
+    [class*="st-key-ui_font_size_mode"] label:has(input:checked) div,
+    [class*="st-key-ui_font_size_mode"] label:has(input:checked) p {
+        color: #ffffff !important;
+    }
+
+    [class*="st-key-ui_font_size_mode"] label:has(input:focus-visible) {
+        outline: 2px solid #93c5fd !important;
+        outline-offset: 2px !important;
+    }
+
+    [class*="st-key-ui_font_size_mode"] label [data-testid="stMarkdownContainer"] p {
+        font-size: 0.76rem !important;
+        line-height: 1.2 !important;
+        font-weight: 720 !important;
+        text-align: center !important;
+        white-space: nowrap !important;
+        overflow: visible !important;
+    }
+
     .bi-section-grid {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1625,8 +1752,30 @@ PAGE_CSS = """
         margin: 0.8rem 0;
     }
 
-    .bi-section-grid > .home-card-group-company-profit-rank {
+    .home-card-group-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        align-items: start;
+    }
+
+    .home-card-group-grid > .home-card-group-company-profit-rank {
         grid-column: 1 / -1;
+    }
+
+    .home-card-group-grid .home-card-group-link:not(.home-card-group-company-profit-rank) .bi-panel {
+        padding: 1.05rem;
+    }
+
+    .home-card-group-grid .home-card-group-link:not(.home-card-group-company-profit-rank) .bi-panel-title {
+        font-size: 1.32rem;
+        line-height: 1.22;
+        font-weight: 780;
+        margin-bottom: 0.7rem;
+    }
+
+    .home-card-group-grid .home-card-group-link:not(.home-card-group-company-profit-rank) .bi-panel-subtitle {
+        font-size: 0.98rem;
+        line-height: 1.4;
+        margin-bottom: 0.9rem;
     }
 
     .bi-two-col {
@@ -1856,6 +2005,375 @@ PAGE_CSS = """
     .home-card-note strong.good { color: #15803d; }
     .home-card-note strong.risk { color: #dc2626; }
 
+    .home-funds-assurance {
+        margin-top: 0.95rem;
+        padding-top: 0.8rem;
+        border-top: 1px solid var(--border-soft);
+        display: grid;
+        gap: 0.62rem;
+    }
+
+    .home-funds-assurance-head {
+        color: #18314f;
+        font-size: 1.14rem;
+        line-height: 1.25;
+        font-weight: 780;
+    }
+
+    .home-funds-assurance-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0;
+        border-top: 1px solid #e5e7eb;
+        border-left: 1px solid #e5e7eb;
+        border-radius: 8px;
+        overflow: hidden;
+        background: #ffffff;
+    }
+
+    .home-funds-assurance-item {
+        min-width: 0;
+        padding: 0.56rem 0.62rem;
+        border-right: 1px solid #e5e7eb;
+        border-bottom: 1px solid #e5e7eb;
+    }
+
+    .home-funds-assurance-label {
+        color: #64748b;
+        font-size: 0.96rem;
+        line-height: 1.3;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .home-funds-assurance-value {
+        margin-top: 0.16rem;
+        color: #0f172a;
+        font-size: 1.38rem;
+        line-height: 1.18;
+        font-weight: 800;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .home-funds-assurance-value.good { color: #15803d; }
+    .home-funds-assurance-value.warn { color: #b45309; }
+    .home-funds-assurance-value.risk { color: #dc2626; }
+    .home-funds-assurance-value.pending { color: #64748b; }
+
+    .home-funds-assurance-conclusion {
+        padding: 0.56rem 0.66rem;
+        border-radius: 8px;
+        font-size: 0.98rem;
+        line-height: 1.35;
+        font-weight: 720;
+    }
+
+    .home-funds-assurance-conclusion.good {
+        color: #166534;
+        background: #ecfdf3;
+    }
+
+    .home-funds-assurance-conclusion.warn {
+        color: #92400e;
+        background: #fff7ed;
+    }
+
+    .home-funds-assurance-conclusion.risk {
+        color: #991b1b;
+        background: #fef2f2;
+    }
+
+    .home-funds-assurance-conclusion.pending {
+        color: #475569;
+        background: #f1f5f9;
+    }
+
+    .home-card-group-grid .home-card-group-link:not(.home-card-group-company-profit-rank) .home-card-mini {
+        gap: 0.72rem;
+    }
+
+    .home-card-group-grid .home-card-group-link:not(.home-card-group-company-profit-rank) .home-card-mini-row {
+        grid-template-columns: minmax(92px, 0.58fr) minmax(118px, 1fr) minmax(96px, 0.52fr);
+        gap: 0.68rem;
+        font-size: 0.96rem;
+    }
+
+    .home-card-group-grid .home-card-group-link:not(.home-card-group-company-profit-rank) .home-card-mini-label {
+        font-size: 0.96rem;
+        font-weight: 720;
+    }
+
+    .home-card-group-grid .home-card-group-link:not(.home-card-group-company-profit-rank) .home-card-mini-track {
+        height: 0.72rem;
+    }
+
+    .home-card-group-grid .home-card-group-link:not(.home-card-group-company-profit-rank) .home-card-mini-value {
+        font-size: 1.22rem;
+        font-weight: 800;
+    }
+
+    .home-card-group-grid .home-card-group-link:not(.home-card-group-company-profit-rank) .home-card-note-grid {
+        gap: 0.55rem;
+        margin-top: 0.86rem;
+    }
+
+    .home-card-group-grid .home-card-group-link:not(.home-card-group-company-profit-rank) .home-card-note {
+        font-size: 0.94rem;
+        line-height: 1.35;
+    }
+
+    .home-card-group-grid .home-card-group-link:not(.home-card-group-company-profit-rank) .home-card-note strong {
+        font-size: 1.42rem;
+        font-weight: 800;
+    }
+
+    .home-card-footnote {
+        margin-top: 0.72rem;
+        padding-top: 0.56rem;
+        border-top: 1px solid var(--border-soft);
+        color: #64748b;
+        font-size: 0.9rem;
+        line-height: 1.35;
+    }
+
+    .home-budget-compare {
+        display: grid;
+        gap: 0.9rem;
+    }
+
+    .home-budget-compare-row {
+        display: grid;
+        gap: 0.34rem;
+        min-width: 0;
+    }
+
+    .home-budget-compare-top {
+        display: grid;
+        grid-template-columns: minmax(88px, 0.7fr) minmax(104px, 0.52fr) minmax(150px, 1fr);
+        gap: 0.72rem;
+        align-items: baseline;
+        min-width: 0;
+        font-size: 0.98rem;
+    }
+
+    .home-budget-compare-label {
+        color: #3f3f46;
+        font-weight: 760;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .home-budget-compare-value {
+        color: #0f172a;
+        font-weight: 820;
+        font-size: 1.48rem;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+    }
+
+    .home-budget-compare-gap {
+        justify-self: end;
+        color: #64748b;
+        font-size: 0.98rem;
+        font-weight: 720;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+    }
+
+    .home-budget-compare-gap.good { color: #15803d; }
+    .home-budget-compare-gap.warn { color: #b45309; }
+    .home-budget-compare-gap.risk { color: #dc2626; }
+
+    .home-budget-track {
+        position: relative;
+        height: 1.05rem;
+        overflow: visible;
+        border-radius: 999px;
+        background: #edf2f7;
+        box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.18);
+    }
+
+    .home-budget-fill {
+        display: block;
+        height: 100%;
+        width: var(--fill-width, 0%);
+        border-radius: 999px;
+        background: #2b7de9;
+    }
+
+    .home-budget-fill.good { background: #2d9d78; }
+    .home-budget-fill.warn { background: #d8912f; }
+    .home-budget-fill.risk { background: #d65045; }
+
+    .home-budget-time-marker {
+        position: absolute;
+        top: -0.24rem;
+        bottom: -0.24rem;
+        left: var(--benchmark-left, 0%);
+        width: 3px;
+        border-radius: 999px;
+        background: #172033;
+        box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9);
+    }
+
+    .home-budget-time-label {
+        margin-top: 0.28rem;
+        color: #64748b;
+        font-size: 0.94rem;
+        font-weight: 760;
+        white-space: nowrap;
+    }
+
+    .home-budget-status-line {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        margin-top: 0.78rem;
+        padding-top: 0.58rem;
+        border-top: 1px solid var(--border-soft);
+        color: #64748b;
+        font-size: 0.94rem;
+    }
+
+    .home-budget-status-pill {
+        display: inline-flex;
+        align-items: center;
+        max-width: 100%;
+        border-radius: 999px;
+        padding: 0.18rem 0.55rem;
+        background: #f1f5f9;
+        color: #18314f;
+        font-weight: 760;
+        white-space: nowrap;
+    }
+
+    .home-budget-status-pill.good { background: #ecfdf3; color: #15803d; }
+    .home-budget-status-pill.warn { background: #fff7ed; color: #b45309; }
+    .home-budget-status-pill.risk { background: #fef2f2; color: #dc2626; }
+
+    .home-expense-donut-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 0.64fr) minmax(0, 0.36fr);
+        gap: 0.72rem;
+        align-items: center;
+        min-width: 0;
+    }
+
+    .home-expense-donut {
+        width: clamp(320px, 32vw, 520px);
+        max-width: 100%;
+        aspect-ratio: 1;
+        border-radius: 50%;
+        background: var(--donut-gradient, #eef2f3);
+        position: relative;
+        margin: 0 auto;
+        box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.16);
+    }
+
+    .home-expense-donut::after {
+        content: "";
+        position: absolute;
+        inset: 26%;
+        border-radius: 50%;
+        background: #fff;
+        box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.14);
+    }
+
+    .home-expense-donut-center {
+        position: absolute;
+        z-index: 1;
+        inset: 27%;
+        display: grid;
+        place-items: center;
+        align-content: center;
+        text-align: center;
+        line-height: 1.18;
+        color: #64748b;
+        font-size: 0.95rem;
+        font-weight: 700;
+    }
+
+    .home-expense-donut-center strong {
+        display: block;
+        margin-top: 0.16rem;
+        color: #18314f;
+        font-size: 1.38rem;
+        font-weight: 840;
+        white-space: nowrap;
+    }
+
+    .home-expense-legend {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 0.5rem;
+        min-width: 0;
+    }
+
+    .home-expense-legend-row {
+        display: grid;
+        grid-template-columns: 0.7rem minmax(0, 1fr);
+        gap: 0.42rem;
+        align-items: start;
+        min-width: 0;
+    }
+
+    .home-expense-dot {
+        width: 0.7rem;
+        height: 0.7rem;
+        margin-top: 0.14rem;
+        border-radius: 999px;
+        background: var(--dot-color, #2b7de9);
+    }
+
+    .home-expense-legend-name {
+        color: #334155;
+        font-size: 0.96rem;
+        font-weight: 760;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .home-expense-legend-meta {
+        margin-top: 0.08rem;
+        color: #64748b;
+        font-size: 0.9rem;
+        font-weight: 680;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .home-expense-bridge-rows {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.55rem;
+        margin-top: 0.9rem;
+    }
+
+    .home-expense-bridge-row {
+        border-top: 1px solid var(--border-soft);
+        padding-top: 0.54rem;
+        color: #64748b;
+        font-size: 0.96rem;
+        line-height: 1.35;
+    }
+
+    .home-expense-bridge-row strong {
+        display: block;
+        color: #18314f;
+        margin-top: 0.1rem;
+        font-size: 1.34rem;
+        font-weight: 800;
+    }
+
+    .home-expense-bridge-row.risk strong { color: #dc2626; }
+
     .home-rank-dual {
         display: grid;
         gap: 0.58rem;
@@ -1874,6 +2392,17 @@ PAGE_CSS = """
         border-radius: 10px;
         background: #fbfdff;
         padding: 0.72rem;
+    }
+
+    .home-card-group-company-profit-rank .bi-panel-title {
+        font-size: 1.32rem;
+        line-height: 1.22;
+        font-weight: 780;
+    }
+
+    .home-card-group-company-profit-rank .bi-panel-subtitle {
+        font-size: 0.98rem;
+        line-height: 1.4;
     }
 
     .home-rank-column-title {
@@ -1914,8 +2443,36 @@ PAGE_CSS = """
 
     .home-card-group-company-profit-rank .home-rank-dual-row,
     .home-card-group-company-profit-rank .home-rank-column-head {
-        grid-template-columns: minmax(100px, 0.62fr) minmax(108px, 0.88fr) minmax(68px, 0.4fr) minmax(86px, 0.55fr);
-        gap: 0.48rem;
+        grid-template-columns: minmax(118px, 0.68fr) minmax(138px, 0.95fr) minmax(92px, 0.48fr) minmax(94px, 0.5fr);
+        gap: 0.62rem;
+    }
+
+    .home-card-group-company-profit-rank .home-rank-column {
+        padding: 0.9rem;
+    }
+
+    .home-card-group-company-profit-rank .home-rank-column-title {
+        font-size: 1.16rem;
+        line-height: 1.25;
+        font-weight: 800;
+        margin-bottom: 0.68rem;
+    }
+
+    .home-card-group-company-profit-rank .home-rank-table-head,
+    .home-card-group-company-profit-rank .home-rank-column-head {
+        font-size: 0.95rem;
+    }
+
+    .home-card-group-company-profit-rank .home-rank-column-head {
+        margin-bottom: 0.5rem;
+    }
+
+    .home-card-group-company-profit-rank .home-rank-dual {
+        gap: 0.72rem;
+    }
+
+    .home-card-group-company-profit-rank .home-rank-dual-row {
+        font-size: 0.98rem;
     }
 
     .home-rank-dual-name {
@@ -1931,6 +2488,11 @@ PAGE_CSS = """
         gap: 0.2rem;
     }
 
+    .home-card-group-company-profit-rank .home-rank-dual-name {
+        font-size: 0.98rem;
+        font-weight: 720;
+    }
+
     .home-rank-dual-track {
         height: 0.38rem;
         overflow: hidden;
@@ -1939,7 +2501,11 @@ PAGE_CSS = """
     }
 
     .home-card-group-company-profit-rank .home-rank-dual-track {
-        height: 0.44rem;
+        height: 0.62rem;
+    }
+
+    .home-card-group-company-profit-rank .home-rank-dual-bars {
+        gap: 0.3rem;
     }
 
     .home-rank-dual-fill {
@@ -1962,8 +2528,10 @@ PAGE_CSS = """
 
     .home-card-group-company-profit-rank .home-rank-dual-value {
         display: grid;
-        gap: 0.08rem;
-        line-height: 1.18;
+        gap: 0.14rem;
+        line-height: 1.2;
+        font-size: 1.02rem;
+        font-weight: 780;
     }
 
     .home-rank-dual-value .profit { color: #15803d; }
@@ -1979,6 +2547,11 @@ PAGE_CSS = """
 
     .home-rank-dual-margin.profit { color: #15803d; }
     .home-rank-dual-margin.loss { color: #dc2626; }
+
+    .home-card-group-company-profit-rank .home-rank-dual-margin {
+        font-size: 1.02rem;
+        font-weight: 800;
+    }
 
     .home-anomaly-tags {
         display: flex;
@@ -1997,6 +2570,130 @@ PAGE_CSS = """
         color: #9a5b00;
         font-size: 0.73rem;
         font-weight: 760;
+    }
+
+    .home-risk-summary-strip {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        border-top: 1px solid var(--border-soft);
+        border-bottom: 1px solid var(--border-soft);
+        margin: 0.16rem 0 0.9rem;
+    }
+
+    .home-risk-summary-item {
+        padding: 0.62rem 0.72rem;
+        color: #64748b;
+        font-size: 0.94rem;
+        line-height: 1.25;
+        text-align: center;
+        border-right: 1px solid var(--border-soft);
+    }
+
+    .home-risk-summary-item:last-child {
+        border-right: 0;
+    }
+
+    .home-risk-summary-item strong {
+        display: block;
+        margin-top: 0.14rem;
+        color: #18314f;
+        font-size: 1.5rem;
+        font-weight: 820;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .home-risk-summary-item.tight strong { color: #dc2626; }
+    .home-risk-summary-item.watch strong { color: #b45309; }
+    .home-risk-summary-item.safe strong { color: #15803d; }
+
+    .home-risk-list {
+        display: grid;
+        overflow: hidden;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        background: #fff;
+    }
+
+    .home-risk-list-title {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(82px, 0.34fr) minmax(86px, 0.38fr);
+        gap: 0.62rem;
+        align-items: center;
+        padding: 0.56rem 0.68rem;
+        color: #64748b;
+        background: #f8fafc;
+        border-bottom: 1px solid #e2e8f0;
+        font-size: 0.9rem;
+        font-weight: 760;
+    }
+
+    .home-risk-list-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(82px, 0.34fr) minmax(86px, 0.38fr);
+        gap: 0.62rem;
+        align-items: center;
+        min-width: 0;
+        padding: 0.58rem 0.68rem;
+        border-bottom: 1px solid #eef2f7;
+        font-size: 0.96rem;
+    }
+
+    .home-risk-list-row:nth-child(even) {
+        background: #fbfdff;
+    }
+
+    .home-risk-list-row:last-child {
+        border-bottom: 0;
+    }
+
+    .home-risk-company {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #1f2937;
+        font-weight: 760;
+    }
+
+    .home-risk-ratio {
+        text-align: right;
+        color: #0f172a;
+        font-weight: 820;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+    }
+
+    .home-risk-status {
+        justify-self: end;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 4.8rem;
+        padding: 0.22rem 0.55rem;
+        border-radius: 999px;
+        font-size: 0.9rem;
+        font-weight: 820;
+        white-space: nowrap;
+    }
+
+    .home-risk-status.tight {
+        color: #b91c1c;
+        background: #fee2e2;
+    }
+
+    .home-risk-status.watch {
+        color: #b45309;
+        background: #fef3c7;
+    }
+
+    .home-risk-status.safe {
+        color: #047857;
+        background: #dcfce7;
+    }
+
+    .home-risk-status.pending {
+        color: #475569;
+        background: #e2e8f0;
     }
 
     .bi-alert-list {
@@ -2049,7 +2746,7 @@ PAGE_CSS = """
         .bi-section-grid {
             grid-template-columns: 1fr;
         }
-        .bi-section-grid > .home-card-group-company-profit-rank {
+        .home-card-group-grid > .home-card-group-company-profit-rank {
             grid-column: auto;
         }
         .home-rank-two-col {
@@ -2059,6 +2756,12 @@ PAGE_CSS = """
         .home-card-group-company-profit-rank .home-rank-column-head {
             grid-template-columns: minmax(92px, 0.62fr) minmax(108px, 0.88fr) minmax(66px, 0.4fr) minmax(82px, 0.55fr);
             gap: 0.48rem;
+        }
+        .home-expense-donut-layout {
+            grid-template-columns: 1fr;
+        }
+        .home-expense-donut {
+            width: min(360px, 72vw);
         }
         .bi-kpi-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2076,6 +2779,24 @@ PAGE_CSS = """
             grid-template-columns: minmax(78px, 0.62fr) minmax(84px, 0.88fr) minmax(58px, 0.4fr) minmax(76px, 0.55fr);
             gap: 0.34rem;
             font-size: 0.72rem;
+        }
+        .home-budget-compare-top {
+            grid-template-columns: minmax(62px, 0.58fr) minmax(72px, 0.44fr) minmax(0, 1fr);
+            gap: 0.36rem;
+        }
+        .home-budget-compare-gap,
+        .home-budget-time-label,
+        .home-budget-status-line {
+            font-size: 0.84rem;
+        }
+        .home-funds-assurance-grid {
+            grid-template-columns: 1fr;
+        }
+        .home-expense-legend {
+            grid-template-columns: 1fr;
+        }
+        .home-expense-donut {
+            width: min(300px, 78vw);
         }
     }
 
@@ -2125,6 +2846,110 @@ def _get_year_month_options(table: str = "account_balance") -> tuple:
     except Exception:
         pass
     return years, months
+
+
+def _budget_actual_db_signature() -> tuple[str, tuple[tuple[str, int, int, int], ...]]:
+    path = get_db_path()
+    signature: list[tuple[str, int, int, int]] = []
+    for candidate in (path, Path(f"{path}-wal"), Path(f"{path}-shm")):
+        try:
+            stat = candidate.stat()
+            signature.append((str(candidate), 1, stat.st_mtime_ns, stat.st_size))
+        except OSError:
+            signature.append((str(candidate), 0, 0, 0))
+    return str(path), tuple(signature)
+
+
+def _budget_period_months(periods: list[str]) -> dict[str, list[str]]:
+    by_year: dict[str, set[str]] = {}
+    for value in periods:
+        period = str(value or "").strip()
+        if not re.fullmatch(r"\d{6}", period):
+            continue
+        month = period[4:6]
+        if "01" <= month <= "12":
+            by_year.setdefault(period[:4], set()).add(month)
+    return {year: sorted(months) for year, months in by_year.items()}
+
+
+@st.cache_data(show_spinner=False, ttl=60)
+def _budget_actual_period_months_cached(
+    db_path: str,
+    db_signature: tuple[tuple[str, int, int, int], ...],
+) -> dict[str, list[str]]:
+    try:
+        rows = execute_sql(
+            """
+            SELECT DISTINCT period
+            FROM pl_detail
+            WHERE period IS NOT NULL
+              AND period GLOB '[0-9][0-9][0-9][0-9][0-9][0-9]'
+              AND item_name IN (:revenue_item, :profit_item)
+              AND ytd_amount IS NOT NULL
+              AND ABS(COALESCE(ytd_amount, 0)) > 0.000001
+            ORDER BY period
+            """,
+            {"revenue_item": PL_REVENUE_ITEM, "profit_item": PL_NET_PROFIT_ITEM},
+        )
+    except Exception:
+        return {}
+    periods = rows["period"].astype(str).tolist() if rows is not None and len(rows) else []
+    return _budget_period_months(periods)
+
+
+def _budget_actual_period_months() -> dict[str, list[str]]:
+    db_path, db_signature = _budget_actual_db_signature()
+    return _budget_actual_period_months_cached(db_path, db_signature)
+
+
+def _budget_default_month(months: list[str], has_actual_months: bool) -> str:
+    if has_actual_months and months:
+        return months[-1]
+    safe_months = months or [f"{idx:02d}" for idx in range(1, 13)]
+    return "03" if "03" in safe_months else safe_months[0]
+
+
+def _resolve_budget_year_month_state(
+    years: list[str],
+    months_by_year: dict[str, list[str]],
+    stored_year: str | None,
+    stored_month: str | None,
+    previous_page: str | None,
+    last_seen_year: str | None,
+) -> tuple[str, str, list[str], bool]:
+    safe_years = years or ["2026"]
+    selected_year = str(stored_year or "")
+    reset_year = selected_year not in safe_years
+    if reset_year:
+        selected_year = safe_years[0]
+
+    actual_months = months_by_year.get(selected_year, [])
+    has_actual_months = bool(actual_months)
+    month_options = actual_months or [f"{idx:02d}" for idx in range(1, 13)]
+    default_month = _budget_default_month(month_options, has_actual_months)
+
+    entering_budget = previous_page != "全面预算"
+    year_changed = bool(last_seen_year) and str(last_seen_year) != selected_year
+    selected_month = str(stored_month or "")
+    if entering_budget or reset_year or year_changed or selected_month not in month_options:
+        selected_month = default_month
+
+    return selected_year, selected_month, month_options, has_actual_months
+
+
+def _prepare_budget_year_month_state(years: list[str], months_by_year: dict[str, list[str]]) -> tuple[list[str], bool]:
+    selected_year, selected_month, month_options, has_actual_months = _resolve_budget_year_month_state(
+        years,
+        months_by_year,
+        st.session_state.get("budget_year"),
+        st.session_state.get("budget_month"),
+        st.session_state.get("_last_rendered_page"),
+        st.session_state.get("_budget_last_seen_year"),
+    )
+    st.session_state["budget_year"] = selected_year
+    st.session_state["budget_month"] = selected_month
+    return month_options, has_actual_months
+
 
 def _cn_cols(df: pd.DataFrame, col_map: dict, keep_only: bool = True) -> pd.DataFrame:
     df = df.rename(columns=col_map)
@@ -2344,6 +3169,7 @@ def _render_bi_kpi_grid(
     kpis: list[dict],
     drill_label_map: dict[str, str] | None = None,
     selected_metric_key: str | None = None,
+    extra_grid_class: str = "",
 ) -> None:
     drill_label_map = drill_label_map or {}
     cards = []
@@ -2361,7 +3187,7 @@ def _render_bi_kpi_grid(
             card_classes = "bi-kpi-card" + (f" {card_kind}" if card_kind else "")
         if drill_key:
             is_selected = drill_key == selected_metric_key
-            href = "?" if is_selected else f"?drill_metric={_html(drill_key)}"
+            href = _app_query_href() if is_selected else _app_query_href({"drill_metric": drill_key})
             title = "点击收起" if is_selected else "点击展开下钻"
             value_markup = (
                 f'<a class="bi-kpi-value-link" href="{href}" target="_top" '
@@ -2379,7 +3205,8 @@ def _render_bi_kpi_grid(
             </div>
             """
         )
-    _render_html(f'<div class="bi-kpi-grid">{"".join(cards)}</div>')
+    grid_class = "bi-kpi-grid" + (f" {_html(extra_grid_class)}" if extra_grid_class else "")
+    _render_html(f'<div class="{grid_class}">{"".join(cards)}</div>')
 
 
 def _progress_row_html(label: str, value, actual=None, target=None, benchmark=None) -> str:
@@ -2426,23 +3253,23 @@ HOME_CARD_GROUP_CONFIG: dict[str, dict[str, str]] = {
     },
     "expense_analysis": {
         "label": "费用分析",
-        "title": "费用分析明细",
-        "subtitle": "沿用现有费用分析口径，展示六类重点费用和公司排行；待后续专项复核。",
+        "title": "费用分析明细 · 按模块",
+        "subtitle": "查看各模块费用构成及占集团成本费用比。",
     },
-    "funds_safety": {
-        "label": "资金安全",
-        "title": "资金安全明细",
-        "subtitle": "沿用现有资金预警口径，展示单体公司资金构成；待后续专项复核。",
+    "operating_anomaly": {
+        "label": "经营异常",
+        "title": "经营异常明细",
+        "subtitle": "沿用当前暂定同比/环比阈值，展示经营波动异常；待后续专项复核。",
     },
     "company_profit_rank": {
         "label": "公司收入利润排行",
         "title": "公司收入利润排行明细",
         "subtitle": "沿用现有 pl_detail 驾驶舱口径，展示公司收入、利润和变化；待后续专项复核。",
     },
-    "operating_anomaly": {
-        "label": "经营异常",
-        "title": "经营异常明细",
-        "subtitle": "沿用当前暂定同比/环比阈值，展示经营波动异常；待后续专项复核。",
+    "funds_safety": {
+        "label": "资金安全",
+        "title": "资金安全明细",
+        "subtitle": "沿用现有资金预警口径，展示单体公司资金构成；待后续专项复核。",
     },
     "funds_turnover_risk": {
         "label": "资金周转风险",
@@ -2477,10 +3304,72 @@ HOME_ERYU_CENTER_CODE = "10204"
 HOME_SONGSHANHU_CODE = "101010138"
 HOME_MAIN_REVENUE_ITEM = "主营业务收入"
 HOME_MANAGEMENT_FEE_ITEM = "管理费服务费"
+HOME_COMPARISON_MIN_DENOMINATOR = 1e-6
+HOME_UNCOMPARABLE_TEXT = "不可比"
+
+
+def _home_metric_missing(value) -> bool:
+    try:
+        return value is None or pd.isna(value)
+    except (TypeError, ValueError):
+        return value is None
+
+
+def _home_relative_change_value(current, previous):
+    if _home_metric_missing(current) or _home_metric_missing(previous):
+        return None
+    previous_value = _safe_float(previous)
+    if abs(previous_value) < HOME_COMPARISON_MIN_DENOMINATOR:
+        return HOME_UNCOMPARABLE_TEXT
+    return (_safe_float(current) - previous_value) / abs(previous_value)
+
+
+def _home_profit_change_value(current, previous):
+    if _home_metric_missing(current) or _home_metric_missing(previous):
+        return None
+    current_value = _safe_float(current)
+    previous_value = _safe_float(previous)
+    if abs(previous_value) < HOME_COMPARISON_MIN_DENOMINATOR:
+        return HOME_UNCOMPARABLE_TEXT
+    if previous_value > 0 and current_value < 0:
+        return "由盈转亏"
+    if previous_value < 0 <= current_value:
+        return "扭亏"
+    if previous_value < 0 and current_value < previous_value:
+        return "亏损扩大"
+    if previous_value < 0 and previous_value <= current_value < 0:
+        return "亏损收窄"
+    return (current_value - previous_value) / abs(previous_value)
+
+
+def _home_comparison_degree(value) -> float:
+    if isinstance(value, str):
+        return 1.0
+    if value is None:
+        return 0.0
+    try:
+        if pd.isna(value):
+            return 0.0
+    except (TypeError, ValueError):
+        return 0.0
+    return abs(_safe_float(value))
+
+
+def _home_metric_has_source_map(rows: pd.DataFrame) -> set[tuple[str, str]]:
+    if rows is None or rows.empty:
+        return set()
+    target = rows[rows["item_name"].astype(str).isin({PL_REVENUE_ITEM, PL_NET_PROFIT_ITEM, PL_COST_TOTAL_ITEM})].copy()
+    preferred = preferred_pl_detail_rows(target)
+    if preferred.empty:
+        return set()
+    return {
+        (str(row.get("company_code") or ""), str(row.get("item_name") or ""))
+        for row in preferred.to_dict("records")
+    }
 
 
 def _home_card_group_href(group_key: str, selected_group_key: str | None = None) -> str:
-    return "?" if group_key == selected_group_key else f"?home_group={quote(str(group_key))}"
+    return _app_query_href() if group_key == selected_group_key else _app_query_href({"home_group": str(group_key)})
 
 
 def _home_card_group_wrap(group_key: str, selected_group_key: str | None, panel_html: str) -> str:
@@ -2503,6 +3392,49 @@ def _home_card_benchmark_left(value) -> str:
 
 def _home_card_status_class(value, benchmark=None) -> str:
     return _progress_class(value, benchmark)
+
+
+def _home_budget_gap_phrase(value) -> str:
+    if _budget_value_missing(value):
+        return "暂无偏离"
+    gap = _safe_float(value)
+    direction = "超前" if gap >= 0 else "滞后"
+    return f"{direction} {abs(gap) * 100:.1f} 个百分点"
+
+
+def _home_budget_gap_class(value) -> str:
+    if _budget_value_missing(value):
+        return "warn"
+    return "good" if _safe_float(value) >= 0 else "risk"
+
+
+def _home_budget_status_class(status: str | None) -> str:
+    text = str(status or "")
+    if any(keyword in text for keyword in ("超前", "改善", "正常")):
+        return "good"
+    if any(keyword in text for keyword in ("滞后", "亏损", "风险")):
+        return "risk"
+    return "warn"
+
+
+def _home_budget_compare_row(label: str, completion, theory, gap) -> str:
+    gap_class = _home_budget_gap_class(gap)
+    return f"""
+        <div class="home-budget-compare-row">
+            <div class="home-budget-compare-top">
+                <div class="home-budget-compare-label">{_html(label)}</div>
+                <div class="home-budget-compare-value">{_html(_fmt_percent(completion))}</div>
+                <div class="home-budget-compare-gap {gap_class}" title="{_html(_home_budget_gap_phrase(gap))}">
+                    {_html(_home_budget_gap_phrase(gap))}
+                </div>
+            </div>
+            <div class="home-budget-track" style="--benchmark-left:{_home_card_benchmark_left(theory)}">
+                <span class="home-budget-fill {_home_card_status_class(completion, theory)}" style="--fill-width:{_home_card_fill_width(completion)}"></span>
+                <span class="home-budget-time-marker" aria-hidden="true"></span>
+            </div>
+            <div class="home-budget-time-label">时间进度 {_html(_fmt_percent(theory))}</div>
+        </div>
+    """
 
 
 def _home_budget_card_summary(budget: dict) -> dict:
@@ -2530,34 +3462,19 @@ def _render_budget_execution_panel(budget: dict, selected_group_key: str | None 
     profit_completion = summary.get("profit_completion")
     income_gap = summary.get("income_gap")
     profit_gap = summary.get("profit_gap")
-    profit_text = _fmt_percent(profit_completion)
-    if profit_text == "-" and not _budget_value_missing(profit_gap):
-        profit_text = _fmt_budget_gap(profit_gap)
+    status = summary.get("status") or "暂无"
+    status_class = _home_budget_status_class(status)
     body = f"""
-        <div class="home-card-mini">
-            <div class="home-card-mini-row">
-                <div class="home-card-mini-label">收入完成</div>
-                <div class="home-card-mini-track benchmark" style="--benchmark-left:{_home_card_benchmark_left(theory)}">
-                    <span class="home-card-mini-fill {_home_card_status_class(income_completion, theory)}" style="--fill-width:{_home_card_fill_width(income_completion)}"></span>
-                </div>
-                <div class="home-card-mini-value">{_html(_fmt_percent(income_completion))}</div>
-            </div>
-            <div class="home-card-mini-row">
-                <div class="home-card-mini-label">利润完成</div>
-                <div class="home-card-mini-track benchmark" style="--benchmark-left:{_home_card_benchmark_left(theory)}">
-                    <span class="home-card-mini-fill {_home_card_status_class(profit_completion, theory)}" style="--fill-width:{_home_card_fill_width(profit_completion)}"></span>
-                </div>
-                <div class="home-card-mini-value">{_html(profit_text)}</div>
-            </div>
+        <div class="home-budget-compare">
+            {_home_budget_compare_row("收入完成", income_completion, theory, income_gap)}
+            {_home_budget_compare_row("利润完成", profit_completion, theory, profit_gap)}
         </div>
-        <div class="home-card-note-grid">
-            <div class="home-card-note">时间进度<strong>{_html(_fmt_percent(theory))}</strong></div>
-            <div class="home-card-note">收入偏离<strong>{_html(_fmt_budget_gap(income_gap))}</strong></div>
-            <div class="home-card-note">利润偏离<strong>{_html(_fmt_budget_gap(profit_gap))}</strong></div>
-            <div class="home-card-note">综合状态<strong>{_html(summary.get("status") or "暂无")}</strong></div>
+        <div class="home-budget-status-line">
+            <span>预算进度</span>
+            <span class="home-budget-status-pill {status_class}">综合状态：{_html(status)}</span>
         </div>
     """
-    panel = _panel_html("预算执行", "复用全面预算口径；点击查看经营单位进度", body)
+    panel = _panel_html("预算执行", "收入、利润对照当前时间进度", body)
     return _home_card_group_wrap("budget_execution", selected_group_key, panel)
 
 
@@ -2621,14 +3538,14 @@ def _render_operating_summary_panel(income: dict, selected_group_key: str | None
         <div class="home-card-mini">
             {row("经营收入", summary["revenue"], "good")}
             {row("成本费用", summary["cost_total"], "warn")}
-            {row("经营净利", summary["net_profit"])}
+            {row("经营净利润", summary["net_profit"])}
         </div>
         <div class="home-card-note-grid">
             <div class="home-card-note">净利率<strong class="{margin_class}">{_html(margin_text)}</strong></div>
-            <div class="home-card-note">口径<strong>收入成本费用表</strong></div>
         </div>
+        <div class="home-card-footnote">经营收入 - 成本费用合计 = 经营净利润</div>
     """
-    panel = _panel_html("经营汇总", "复用经营汇总收入成本费用口径；点击查看公司明细", body)
+    panel = _panel_html("经营汇总", "收入、成本、利润与净利率", body)
     return _home_card_group_wrap("operating_summary", selected_group_key, panel)
 
 
@@ -2638,6 +3555,63 @@ def _home_expense_analysis_for_scope(period: str, company_codes: tuple[str, ...]
     return build_focus_expense_analysis(source_df)
 
 
+HOME_EXPENSE_DONUT_COLORS = (
+    "#2563eb",
+    "#16a34a",
+    "#f97316",
+    "#dc2626",
+    "#7c3aed",
+    "#0891b2",
+)
+
+
+def _home_expense_donut_html(categories: pd.DataFrame) -> str:
+    view = categories.copy()
+    view["_amount"] = pd.to_numeric(view.get("本月金额", 0), errors="coerce").fillna(0.0)
+    rows = view.to_dict("records")
+    positive_total = sum(max(_safe_float(row.get("_amount")), 0.0) for row in rows)
+    six_total = sum(_safe_float(row.get("_amount")) for row in rows)
+    if positive_total <= 1e-9:
+        return '<div class="bi-empty">暂无六类重点费用数据</div>'
+
+    segments: list[str] = []
+    legend_rows: list[str] = []
+    cursor = 0.0
+    for idx, item in enumerate(rows):
+        color = HOME_EXPENSE_DONUT_COLORS[idx % len(HOME_EXPENSE_DONUT_COLORS)]
+        amount = _safe_float(item.get("_amount"))
+        slice_amount = max(amount, 0.0)
+        start = cursor
+        cursor += slice_amount / positive_total * 360.0
+        if slice_amount > 0:
+            segments.append(f"{color} {start:.2f}deg {cursor:.2f}deg")
+        ratio = amount / six_total if abs(six_total) > 1e-9 else None
+        label = str(item.get("费用类别", ""))
+        legend_rows.append(
+            f"""
+            <div class="home-expense-legend-row">
+                <span class="home-expense-dot" style="--dot-color:{color}"></span>
+                <div>
+                    <div class="home-expense-legend-name" title="{_html(label)}">{_html(label)}</div>
+                    <div class="home-expense-legend-meta" title="{_html(_fmt_money_compact(amount))}">{_html(_fmt_percent(ratio))} · {_html(_fmt_money_compact(amount))}</div>
+                </div>
+            </div>
+            """
+        )
+    gradient = ", ".join(segments) if segments else "#eef2f3 0deg 360deg"
+    return f"""
+        <div class="home-expense-donut-layout">
+            <div class="home-expense-donut" style="--donut-gradient:conic-gradient({gradient})">
+                <div class="home-expense-donut-center">
+                    六类重点费用合计
+                    <strong>{_html(_fmt_money_compact(six_total))}</strong>
+                </div>
+            </div>
+            <div class="home-expense-legend">{"".join(legend_rows)}</div>
+        </div>
+    """
+
+
 def _render_expense_analysis_panel(analysis: dict, selected_group_key: str | None = None) -> str:
     categories = analysis.get("categories") if isinstance(analysis, dict) else pd.DataFrame()
     management = analysis.get("management_fee", {}) if isinstance(analysis, dict) else {}
@@ -2645,128 +3619,133 @@ def _render_expense_analysis_panel(analysis: dict, selected_group_key: str | Non
     if not isinstance(categories, pd.DataFrame) or categories.empty:
         body = '<div class="bi-empty">暂无六类重点费用数据</div>'
     else:
-        view = categories.copy()
-        view["_amount"] = pd.to_numeric(view.get("本月金额", 0), errors="coerce").fillna(0.0)
-        max_value = max(float(view["_amount"].abs().max()), 1.0)
-        rows: list[str] = []
-        for item in view.to_dict("records"):
-            amount = _safe_float(item.get("本月金额"))
-            width = max(abs(amount) / max_value * 100, 2)
-            rows.append(
-                f"""
-                <div class="home-card-mini-row">
-                    <div class="home-card-mini-label" title="{_html(item.get("费用类别", ""))}">{_html(item.get("费用类别", ""))}</div>
-                    <div class="home-card-mini-track">
-                        <span class="home-card-mini-fill warn" style="--fill-width:{width:.1f}%"></span>
-                    </div>
-                    <div class="home-card-mini-value">{_html(_fmt_money_compact(amount))}</div>
-                </div>
-                """
-            )
-        body = f'<div class="home-card-mini">{"".join(rows)}</div>'
+        body = _home_expense_donut_html(categories)
     body += f"""
-        <div class="home-card-note-grid">
-            <div class="home-card-note">管理费服务费<strong>{_html(_fmt_money_compact(management.get("amount")))}</strong></div>
-            <div class="home-card-note">{_html(bridge.get("label", "其他费用"))}<strong>{_html(_fmt_money_compact(bridge.get("check_difference") if bridge.get("status") == "warning" else bridge.get("other_fee")))}</strong></div>
-            <div class="home-card-note">口径状态<strong>沿用现有口径</strong></div>
+        <div class="home-expense-bridge-rows">
+            <div class="home-expense-bridge-row">管理费服务费<strong>{_html(_fmt_money_compact(management.get("amount")))}</strong></div>
+            <div class="home-expense-bridge-row {'risk' if bridge.get("status") == "warning" else ''}">{_html(bridge.get("label", "其他费用"))}<strong>{_html(_fmt_money_compact(bridge.get("check_difference") if bridge.get("status") == "warning" else bridge.get("other_fee")))}</strong></div>
         </div>
-        <div class="home-card-note">{_html(_expense_bridge_sentence(bridge))}</div>
+        <div class="home-card-footnote">{_html(_expense_bridge_sentence(bridge))}</div>
     """
-    panel = _panel_html("费用分析", "重点关注人工、租金、折旧摊销及波动费用", body)
+    panel = _panel_html("费用分析", "六类重点费用占比与成本桥接", body)
     return _home_card_group_wrap("expense_analysis", selected_group_key, panel)
 
 
 def _home_expense_analysis_detail_for_scope(period: str, company_codes: list[str]) -> pd.DataFrame:
-    analysis = _home_expense_analysis_for_scope(period, tuple(company_codes))
-    categories = analysis.get("categories") if isinstance(analysis, dict) else pd.DataFrame()
-    rows: list[dict] = []
-    if isinstance(categories, pd.DataFrame) and not categories.empty:
-        for item in categories.to_dict("records"):
-            rows.append(
-                {
-                    "明细类型": "费用类别",
-                    "费用类别": item.get("费用类别"),
-                    "公司": "-",
-                    "业务板块": "-",
-                    "金额": item.get("本月金额"),
-                    "占成本费用比": item.get("占成本费用比"),
-                    "占收入比": item.get("占收入比"),
-                    "占比": None,
-                    "状态": item.get("状态说明"),
-                }
-            )
-
-    group_lookup = _home_company_business_group_lookup()
     try:
         source_df = get_operating_summary_source_detail(period, list(company_codes))
     except Exception:
         source_df = pd.DataFrame()
+    return _home_expense_module_detail_from_source(source_df, company_codes)
 
-    if isinstance(source_df, pd.DataFrame) and not source_df.empty:
-        source = source_df.copy()
-        for column in ["source_item_name", "company_name", "company_code", "account_code"]:
-            if column not in source.columns:
-                source[column] = ""
-        if "current_amount" not in source.columns:
-            source["current_amount"] = 0.0
-        source["source_item_name"] = source["source_item_name"].astype(str).str.strip()
-        source["current_amount"] = pd.to_numeric(source["current_amount"], errors="coerce").fillna(0.0)
-        detail = source[source.apply(lambda row: _is_income_cost_detail_row(row.to_dict()), axis=1)].copy()
+
+def _home_expense_module_detail_from_source(source_df: pd.DataFrame, company_codes: list[str]) -> pd.DataFrame:
+    columns = [
+        "模块/公司",
+        "人工成本",
+        "租金水电物业",
+        "折旧摊销",
+        "交际接待交通",
+        "办公行政",
+        "财务费用",
+        "管理费服务费",
+        "其他费用（或待核对差额）",
+        "成本费用合计",
+        "占集团成本费用比",
+    ]
+    if source_df is None or source_df.empty:
+        return pd.DataFrame(columns=columns)
+
+    source = source_df.copy()
+    for column in ["source_item_name", "company_name", "company_code", "account_code"]:
+        if column not in source.columns:
+            source[column] = ""
+    if "current_amount" not in source.columns:
+        source["current_amount"] = 0.0
+    source["company_code"] = source["company_code"].astype(str).str.strip()
+    source["company_name"] = source["company_name"].astype(str).str.strip()
+    source["source_item_name"] = source["source_item_name"].astype(str).str.strip()
+    source["current_amount"] = pd.to_numeric(source["current_amount"], errors="coerce").fillna(0.0)
+    pseudo_names = {"合计", "合并", "总计"}
+    source = source[
+        ~source["company_code"].isin(pseudo_names)
+        & ~source["company_name"].isin(pseudo_names)
+    ].copy()
+    if source.empty:
+        return pd.DataFrame(columns=columns)
+
+    source_name_map = {
+        str(row.get("company_code")): str(row.get("company_name"))
+        for row in source[["company_code", "company_name"]].drop_duplicates().to_dict("records")
+        if str(row.get("company_code") or "") and str(row.get("company_name") or "")
+    }
+    detail = source[source.apply(lambda row: _is_income_cost_detail_row(row.to_dict()), axis=1)].copy()
+    raw_rows: list[dict] = []
+
+    for group in _operating_card_group_scopes(company_codes):
+        group_codes = [str(code) for code in group.get("codes", []) if str(code)]
+        if not group_codes:
+            continue
+        group_source = source[source["company_code"].isin(group_codes)].copy()
+        if group_source.empty:
+            continue
+        group_detail = detail[detail["company_code"].isin(group_codes)].copy()
+        category_amounts: dict[str, float] = {}
         for rule in EXPENSE_FOCUS_CATEGORY_RULES:
-            matched = detail[detail["source_item_name"].isin(rule["items"])].copy()
-            if matched.empty:
-                continue
-            total_amount = _safe_float(matched["current_amount"].sum())
-            by_company = (
-                matched.groupby(["company_code", "company_name"], dropna=False)["current_amount"]
-                .sum()
-                .reset_index()
-                .sort_values("current_amount", ascending=False, kind="mergesort")
-                .head(5)
-            )
-            category_status = ""
-            if isinstance(categories, pd.DataFrame) and not categories.empty:
-                matched_status = categories[categories["费用类别"] == rule["category"]]
-                if not matched_status.empty:
-                    category_status = str(matched_status.iloc[0].get("状态说明") or "")
-            for item in by_company.to_dict("records"):
-                company_code = str(item.get("company_code") or "")
-                company_name = str(item.get("company_name") or company_code or "未识别")
-                rows.append(
-                    {
-                        "明细类型": "公司排行",
-                        "费用类别": rule["category"],
-                        "公司": company_name,
-                        "业务板块": group_lookup.get(company_code) or group_lookup.get(company_name) or "-",
-                        "金额": item.get("current_amount"),
-                        "占成本费用比": None,
-                        "占收入比": None,
-                        "占比": _expense_ratio(item.get("current_amount"), total_amount),
-                        "状态": category_status,
-                    }
-                )
-    else:
-        ranking = analysis.get("ranking") if isinstance(analysis, dict) else pd.DataFrame()
-        if isinstance(ranking, pd.DataFrame) and not ranking.empty:
-            for item in ranking.to_dict("records"):
-                company_name = str(item.get("主要经营单位") or "-")
-                rows.append(
-                    {
-                        "明细类型": "公司排行",
-                        "费用类别": item.get("费用类别"),
-                        "公司": company_name,
-                        "业务板块": group_lookup.get(company_name, "-"),
-                        "金额": item.get("本月金额"),
-                        "占成本费用比": None,
-                        "占收入比": None,
-                        "占比": item.get("占比"),
-                        "状态": item.get("判断"),
-                    }
-                )
-    return pd.DataFrame(
-        rows,
-        columns=["明细类型", "费用类别", "公司", "业务板块", "金额", "占成本费用比", "占收入比", "占比", "状态"],
-    )
+            matched = group_detail[group_detail["source_item_name"].isin(rule["items"])]
+            category_amounts[rule["category"]] = _safe_float(matched["current_amount"].sum()) if len(matched) else 0.0
+        management_rows = group_detail[group_detail["source_item_name"].isin(EXPENSE_MANAGEMENT_FEE_ITEMS)]
+        management_amount = _safe_float(management_rows["current_amount"].sum()) if len(management_rows) else 0.0
+        cost_total = _preferred_expense_denominator(group_source, "成本费用合计")
+        six_total = sum(_safe_float(value) for value in category_amounts.values())
+        bridge = _expense_bridge_summary(
+            cost_total,
+            pd.DataFrame([{"本月金额": value} for value in category_amounts.values()]),
+            management_amount,
+        )
+        other_or_check = (
+            -_safe_float(bridge.get("check_difference"))
+            if bridge.get("status") == "warning"
+            else _safe_float(bridge.get("other_fee"))
+        )
+        if (
+            abs(cost_total) < 1e-9
+            and abs(six_total) < 1e-9
+            and abs(management_amount) < 1e-9
+            and abs(other_or_check) < 1e-9
+        ):
+            continue
+        label = str(group.get("label") or "")
+        if not group.get("is_module") and group_codes:
+            label = source_name_map.get(group_codes[0], label or group_codes[0])
+        raw_rows.append(
+            {
+                "模块/公司": label,
+                **category_amounts,
+                "管理费服务费": management_amount,
+                "其他费用（或待核对差额）": other_or_check,
+                "成本费用合计": cost_total,
+            }
+        )
+
+    if not raw_rows:
+        return pd.DataFrame(columns=columns)
+
+    total_cost = sum(_safe_float(row.get("成本费用合计")) for row in raw_rows)
+    view_rows: list[dict] = []
+    amount_columns = columns[1:-1]
+    for row in raw_rows:
+        converted = {"模块/公司": row["模块/公司"]}
+        for column in amount_columns:
+            converted[column] = _safe_float(row.get(column)) / 10000.0
+        converted["占集团成本费用比"] = _expense_ratio(row.get("成本费用合计"), total_cost)
+        view_rows.append(converted)
+
+    total_row = {"模块/公司": "合计"}
+    for column in amount_columns:
+        total_row[column] = sum(_safe_float(row.get(column)) for row in view_rows)
+    total_row["占集团成本费用比"] = 1.0 if abs(total_cost) > 1e-9 else None
+    return pd.DataFrame(view_rows + [total_row], columns=columns)
 
 
 def _home_funds_warning_rows_for_period(period: str) -> pd.DataFrame:
@@ -2805,18 +3784,37 @@ def _home_funds_summary_from_rows(rows: pd.DataFrame) -> dict:
             "其他应付款合计": 0.0,
             "可使用周转资金合计": 0.0,
             "集团资金周转系数": None,
+            "纳入口径可使用周转资金合计": None,
+            "纳入口径近6月平均经营成本合计": None,
+            "三个月安全资金线": None,
+            "安全余量": None,
             "资金紧张公司数": 0,
             "资金关注公司数": 0,
             "资金安全公司数": 0,
             "风险Top5": pd.DataFrame(columns=["公司/校区", "资金周转系数", "资金状态"]),
             "公司数": 0,
         }
+    ratio_rows = _funds_warning_group_ratio_rows(rows)
+    if ratio_rows.empty:
+        ratio_available = None
+        ratio_avg_cost = None
+        safety_line = None
+        safety_margin = None
+    else:
+        ratio_available = _funds_card_money_sum(ratio_rows, "可使用周转资金")
+        ratio_avg_cost = _funds_card_money_sum(ratio_rows, "近6月平均经营成本")
+        safety_line = ratio_avg_cost * 3
+        safety_margin = ratio_available - safety_line
     return {
         "货币资金合计": _funds_card_money_sum(rows, "货币资金"),
         "其他应收款合计": _funds_card_money_sum(rows, "其他应收款"),
         "其他应付款合计": _funds_card_money_sum(rows, "其他应付款"),
         "可使用周转资金合计": _funds_card_money_sum(rows, "可使用周转资金"),
         "集团资金周转系数": _funds_warning_group_turnover_ratio(rows),
+        "纳入口径可使用周转资金合计": ratio_available,
+        "纳入口径近6月平均经营成本合计": ratio_avg_cost,
+        "三个月安全资金线": safety_line,
+        "安全余量": safety_margin,
         "资金紧张公司数": int((rows.get("资金状态", pd.Series(dtype=str)) == "资金紧张").sum()),
         "资金关注公司数": int((rows.get("资金状态", pd.Series(dtype=str)) == "资金关注").sum()),
         "资金安全公司数": int((rows.get("资金状态", pd.Series(dtype=str)) == "资金安全").sum()),
@@ -2853,6 +3851,31 @@ def _funds_card_money_sum(rows: pd.DataFrame, column: str) -> float:
     return _safe_float(pd.to_numeric(rows[column], errors="coerce").fillna(0.0).sum())
 
 
+def _home_funds_assurance_money_text(value) -> str:
+    if value is None or pd.isna(value):
+        return "待接入"
+    return _fmt_money_compact(value)
+
+
+def _home_funds_assurance_value_class(value) -> str:
+    if value is None or pd.isna(value):
+        return "pending"
+    if _safe_float(value) < 0:
+        return "risk"
+    return "good"
+
+
+def _home_funds_assurance_conclusion(group_ratio) -> tuple[str, str]:
+    if group_ratio is None or pd.isna(group_ratio):
+        return "资金数据待接入", "pending"
+    ratio = _safe_float(group_ratio)
+    if ratio >= 3:
+        return f"高于安全线 {ratio - 3:.1f} 个月 / 资金保障充足", "good"
+    if ratio >= 2:
+        return f"距离安全线差 {3 - ratio:.1f} 个月 / 需要关注", "warn"
+    return f"低于紧张线 {2 - ratio:.1f} 个月 / 资金紧张", "risk"
+
+
 def _render_funds_safety_panel(summary: dict | pd.DataFrame, selected_group_key: str | None = None) -> str:
     if isinstance(summary, pd.DataFrame):
         summary = _home_funds_summary_from_rows(summary)
@@ -2862,6 +3885,10 @@ def _render_funds_safety_panel(summary: dict | pd.DataFrame, selected_group_key:
     payable = _safe_float(summary.get("其他应付款合计"))
     available = _safe_float(summary.get("可使用周转资金合计"))
     group_ratio = summary.get("集团资金周转系数")
+    avg_cost = summary.get("纳入口径近6月平均经营成本合计")
+    safety_line = summary.get("三个月安全资金线")
+    safety_margin = summary.get("安全余量")
+    conclusion, conclusion_class = _home_funds_assurance_conclusion(group_ratio)
     components = [
         ("货币资金", cash, "good"),
         ("其他应收", receivable, "good"),
@@ -2886,12 +3913,31 @@ def _render_funds_safety_panel(summary: dict | pd.DataFrame, selected_group_key:
         )
     body = f"""
         <div class="home-card-mini">{"".join(body_rows)}</div>
-        <div class="home-card-note-grid">
-            <div class="home-card-note">集团资金周转系数<strong>{_html(_funds_warning_ratio_text(group_ratio))}</strong></div>
-            <div class="home-card-note">口径状态<strong>沿用现有口径</strong></div>
+        <div class="home-funds-assurance">
+            <div class="home-funds-assurance-head">资金保障能力</div>
+            <div class="home-funds-assurance-grid">
+                <div class="home-funds-assurance-item">
+                    <div class="home-funds-assurance-label">近6月月均经营成本</div>
+                    <div class="home-funds-assurance-value">{_html(_home_funds_assurance_money_text(avg_cost))}</div>
+                </div>
+                <div class="home-funds-assurance-item">
+                    <div class="home-funds-assurance-label">3个月安全资金线</div>
+                    <div class="home-funds-assurance-value">{_html(_home_funds_assurance_money_text(safety_line))}</div>
+                </div>
+                <div class="home-funds-assurance-item">
+                    <div class="home-funds-assurance-label">集团资金周转系数</div>
+                    <div class="home-funds-assurance-value">{_html(_funds_warning_ratio_text(group_ratio))}</div>
+                </div>
+                <div class="home-funds-assurance-item">
+                    <div class="home-funds-assurance-label">安全余量</div>
+                    <div class="home-funds-assurance-value {_home_funds_assurance_value_class(safety_margin)}">{_html(_home_funds_assurance_money_text(safety_margin))}</div>
+                </div>
+            </div>
+            <div class="home-funds-assurance-conclusion {conclusion_class}">{_html(conclusion)}</div>
         </div>
+        <div class="home-card-footnote">资金类仅取科目余额表；其他应收/应付仅取公司往来。</div>
     """
-    panel = _panel_html("资金安全", "资金构成与集团周转系数；点击查看单体公司", body)
+    panel = _panel_html("资金安全", "资金构成与集团周转系数", body)
     return _home_card_group_wrap("funds_safety", selected_group_key, panel)
 
 
@@ -2900,6 +3946,25 @@ def _funds_risk_rows(rows: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     risk_rows = rows[rows["资金状态"].isin(["资金紧张", "资金关注"])].copy()
     return _funds_warning_sort_rows(risk_rows, "按风险从高到低")
+
+
+def _home_risk_status_class(status: str) -> str:
+    if status == "资金紧张":
+        return "tight"
+    if status == "资金关注":
+        return "watch"
+    if status == "资金安全":
+        return "safe"
+    return "pending"
+
+
+def _home_turnover_ratio_text(value) -> str:
+    try:
+        if value is None or pd.isna(value):
+            return "-"
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return "-"
 
 
 def _render_funds_turnover_risk_panel(summary: dict | pd.DataFrame, selected_group_key: str | None = None) -> str:
@@ -2914,34 +3979,40 @@ def _render_funds_turnover_risk_panel(summary: dict | pd.DataFrame, selected_gro
     if risk_rows.empty:
         risk_html = '<div class="bi-empty">当前范围暂无资金紧张或关注公司</div>'
     else:
-        risk_html = ""
+        risk_list_rows = []
         for item in risk_rows.to_dict("records"):
-            ratio = item.get("资金周转系数")
-            try:
-                ratio_value = float(ratio)
-            except (TypeError, ValueError):
-                ratio_value = 0.0
-            width = min(max((3.0 - ratio_value) / 3.0 * 100, 8), 100)
-            tone = "risk" if item.get("资金状态") == "资金紧张" else "warn"
-            risk_html += f"""
-                <div class="home-card-mini-row">
-                    <div class="home-card-mini-label" title="{_html(item.get("公司/校区", ""))}">{_html(item.get("公司/校区", ""))}</div>
-                    <div class="home-card-mini-track">
-                        <span class="home-card-mini-fill {tone}" style="--fill-width:{width:.1f}%"></span>
-                    </div>
-                    <div class="home-card-mini-value">{_html(_funds_warning_ratio_text(item.get("资金周转系数")))}</div>
+            status = str(item.get("资金状态") or "")
+            status_class = _home_risk_status_class(status)
+            company = str(item.get("公司/校区") or "")
+            risk_list_rows.append(
+                f"""
+                <div class="home-risk-list-row">
+                    <div class="home-risk-company" title="{_html(company)}">{_html(company)}</div>
+                    <div class="home-risk-ratio">{_html(_home_turnover_ratio_text(item.get("资金周转系数")))}</div>
+                    <span class="home-risk-status {status_class}">{_html(status or "待接入")}</span>
                 </div>
-            """
+                """
+            )
+        risk_html = f"""
+            <div class="home-risk-list">
+                <div class="home-risk-list-title">
+                    <span>风险优先清单</span>
+                    <span style="text-align:right;">系数</span>
+                    <span style="text-align:right;">状态</span>
+                </div>
+                {"".join(risk_list_rows)}
+            </div>
+        """
     body = f"""
-        <div class="home-card-note-grid">
-            <div class="home-card-note">资金紧张<strong class="risk">{tight_count}</strong></div>
-            <div class="home-card-note">资金关注<strong>{watch_count}</strong></div>
-            <div class="home-card-note">资金安全<strong class="good">{safe_count}</strong></div>
-            <div class="home-card-note">口径状态<strong>沿用现有口径</strong></div>
+        <div class="home-risk-summary-strip">
+            <div class="home-risk-summary-item tight">资金紧张<strong>{tight_count} 家</strong></div>
+            <div class="home-risk-summary-item watch">资金关注<strong>{watch_count} 家</strong></div>
+            <div class="home-risk-summary-item safe">资金安全<strong>{safe_count} 家</strong></div>
         </div>
-        <div class="home-card-mini" style="margin-top:.72rem;">{risk_html}</div>
+        {risk_html}
+        <div class="home-card-footnote">点击查看全部公司</div>
     """
-    panel = _panel_html("资金周转风险", "紧张和关注公司优先展示；点击查看预警清单", body)
+    panel = _panel_html("资金周转风险", "紧张和关注公司优先展示", body)
     return _home_card_group_wrap("funds_turnover_risk", selected_group_key, panel)
 
 
@@ -2954,6 +4025,20 @@ def _home_company_operating_metrics_for_scope(period: str, company_codes: tuple[
         return pd.DataFrame(columns=columns)
     result = metrics.copy()
     result["company_code"] = result["company_code"].astype(str)
+    source_map = _home_metric_has_source_map(source_rows)
+    for item_name, column in (
+        (PL_REVENUE_ITEM, "收入"),
+        (PL_COST_TOTAL_ITEM, "成本费用合计"),
+        (PL_NET_PROFIT_ITEM, "净利润"),
+    ):
+        has_source = result["company_code"].apply(lambda code: (str(code), item_name) in source_map)
+        result.loc[~has_source, column] = pd.NA
+    result["净利率"] = result.apply(
+        lambda row: None
+        if _home_metric_missing(row.get("收入")) or _home_metric_missing(row.get("净利润"))
+        else _safe_ratio_ui(row.get("净利润"), row.get("收入")),
+        axis=1,
+    )
     result = result[~result["company_code"].isin(HOME_CONSOLIDATION_RANK_EXCLUDED_CODES)].copy()
     group_lookup = _home_company_business_group_lookup()
     result["业务板块"] = result.apply(
@@ -2962,12 +4047,16 @@ def _home_company_operating_metrics_for_scope(period: str, company_codes: tuple[
         or "未分组",
         axis=1,
     )
-    return result[columns].sort_values(["收入", "company_code"], ascending=[False, True])
+    result["_income_sort"] = pd.to_numeric(result["收入"], errors="coerce")
+    return (
+        result[columns + ["_income_sort"]]
+        .sort_values(["_income_sort", "company_code"], ascending=[False, True], na_position="last")
+        .drop(columns=["_income_sort"])
+    )
 
 
 def _home_company_operating_comparison_frame(period: str, company_codes: tuple[str, ...]) -> pd.DataFrame:
-    periods = get_dashboard_periods()
-    prev_period = _previous_period(periods, period)
+    prev_period = _period_previous_month(period)
     last_year_period = _period_same_month_last_year(period)
     current = _home_company_operating_metrics_for_scope(period, company_codes)
     columns = [
@@ -3029,19 +4118,29 @@ def _home_company_operating_comparison_frame(period: str, company_codes: tuple[s
         }
     )
     merged = merged.merge(last_year[["company_code", "去年同期收入", "去年同期净利润"]], on="company_code", how="left")
-    merged["收入环比"] = merged.apply(lambda row: _relative_change_value(row.get("本月收入"), row.get("上月收入")), axis=1)
-    merged["收入同比"] = merged.apply(lambda row: _relative_change_value(row.get("本月收入"), row.get("去年同期收入")), axis=1)
-    merged["利润环比"] = merged.apply(lambda row: _relative_change_value(row.get("本月净利润"), row.get("上月净利润")), axis=1)
-    merged["利润同比"] = merged.apply(lambda row: _relative_change_value(row.get("本月净利润"), row.get("去年同期净利润")), axis=1)
-    merged["成本费用环比"] = merged.apply(lambda row: _relative_change_value(row.get("本月成本费用"), row.get("上月成本费用")), axis=1)
+    merged["收入环比"] = merged.apply(lambda row: _home_relative_change_value(row.get("本月收入"), row.get("上月收入")), axis=1)
+    merged["收入同比"] = merged.apply(lambda row: _home_relative_change_value(row.get("本月收入"), row.get("去年同期收入")), axis=1)
+    merged["利润环比"] = merged.apply(lambda row: _home_profit_change_value(row.get("本月净利润"), row.get("上月净利润")), axis=1)
+    merged["利润同比"] = merged.apply(lambda row: _home_profit_change_value(row.get("本月净利润"), row.get("去年同期净利润")), axis=1)
+    merged["成本费用环比"] = merged.apply(lambda row: _home_relative_change_value(row.get("本月成本费用"), row.get("上月成本费用")), axis=1)
     merged["净利率变化"] = merged.apply(
         lambda row: None
         if pd.isna(row.get("本月净利率")) or pd.isna(row.get("上月净利率"))
         else _safe_float(row.get("本月净利率")) - _safe_float(row.get("上月净利率")),
         axis=1,
     )
-    merged["收入排名"] = merged["本月收入"].rank(method="min", ascending=False)
-    merged["利润排名"] = merged["本月净利润"].rank(method="min", ascending=False)
+    merged["_income_sort"] = pd.to_numeric(merged["本月收入"], errors="coerce")
+    merged["_profit_sort"] = pd.to_numeric(merged["本月净利润"], errors="coerce")
+    income_order = merged.sort_values(["_income_sort", "company_code"], ascending=[False, True], na_position="last").index
+    profit_order = merged.sort_values(["_profit_sort", "company_code"], ascending=[False, True], na_position="last").index
+    merged["收入排名"] = pd.NA
+    merged["利润排名"] = pd.NA
+    for rank, idx in enumerate(income_order, start=1):
+        if not pd.isna(merged.at[idx, "_income_sort"]):
+            merged.at[idx, "收入排名"] = rank
+    for rank, idx in enumerate(profit_order, start=1):
+        if not pd.isna(merged.at[idx, "_profit_sort"]):
+            merged.at[idx, "利润排名"] = rank
     total_revenue = _safe_float(pd.to_numeric(merged["本月收入"], errors="coerce").fillna(0.0).sum())
     total_abs_profit = max(_safe_float(pd.to_numeric(merged["本月净利润"], errors="coerce").fillna(0.0).abs().sum()), 1.0)
     merged["收入占比"] = merged["本月收入"].apply(lambda value: _safe_ratio_ui(value, total_revenue))
@@ -3076,13 +4175,15 @@ def _home_company_rank_detail_for_scope(period: str, company_codes: tuple[str, .
             "本月净利率": "净利率",
         }
     )
-    return result[columns].sort_values(["经营收入", "公司"], ascending=[False, True])
+    result["_income_sort"] = pd.to_numeric(result.get("经营收入"), errors="coerce")
+    result = result.sort_values(["_income_sort", "company_code"], ascending=[False, True], na_position="last")
+    return result[columns]
 
 
 @st.cache_data(show_spinner=False, ttl=120)
 def _home_company_rank_summary_for_scope(period: str, company_codes: tuple[str, ...]) -> pd.DataFrame:
     metrics = _home_company_operating_metrics_for_scope(period, company_codes)
-    columns = ["公司", "业务板块", "经营收入", "经营净利润", "净利率"]
+    columns = ["company_code", "公司", "业务板块", "经营收入", "经营净利润", "净利率"]
     if metrics is None or metrics.empty:
         return pd.DataFrame(columns=columns)
     result = metrics.rename(
@@ -3091,7 +4192,12 @@ def _home_company_rank_summary_for_scope(period: str, company_codes: tuple[str, 
             "净利润": "经营净利润",
         }
     )
-    return result[columns].sort_values(["经营净利润", "公司"], ascending=[False, True])
+    result["_profit_sort"] = pd.to_numeric(result.get("经营净利润"), errors="coerce")
+    return (
+        result[columns + ["_profit_sort"]]
+        .sort_values(["_profit_sort", "company_code"], ascending=[False, True], na_position="last")
+        .drop(columns=["_profit_sort"])
+    )
 
 
 def _home_company_rank_panel_slices(detail: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -3100,14 +4206,16 @@ def _home_company_rank_panel_slices(detail: pd.DataFrame) -> tuple[pd.DataFrame,
         return empty, empty
     view = detail.copy()
     view["_profit_sort"] = pd.to_numeric(view.get("经营净利润"), errors="coerce")
+    if "company_code" not in view.columns:
+        view["company_code"] = view.get("公司", "")
     profitable = (
         view[view["_profit_sort"] > 0]
-        .sort_values(["_profit_sort", "公司"], ascending=[False, True], na_position="last")
+        .sort_values(["_profit_sort", "company_code", "公司"], ascending=[False, True, True], na_position="last")
         .head(5)
         .drop(columns=["_profit_sort"], errors="ignore")
     )
     bottom = (
-        view.sort_values(["_profit_sort", "公司"], ascending=[True, True], na_position="last")
+        view.sort_values(["_profit_sort", "company_code", "公司"], ascending=[True, True, True], na_position="last")
         .head(5)
         .drop(columns=["_profit_sort"], errors="ignore")
     )
@@ -3189,23 +4297,47 @@ def _render_company_profit_rank_panel(detail: pd.DataFrame, selected_group_key: 
 
 
 def _home_anomaly_row_from_comparison(row: pd.Series) -> dict | None:
-    checks = [
-        ("收入同比下降", row.get("收入同比"), lambda value: value < HOME_OPERATING_ANOMALY_THRESHOLDS["收入同比下降"]),
-        ("收入环比下降", row.get("收入环比"), lambda value: value < HOME_OPERATING_ANOMALY_THRESHOLDS["收入环比下降"]),
-        ("利润同比下降", row.get("利润同比"), lambda value: value < HOME_OPERATING_ANOMALY_THRESHOLDS["利润同比下降"]),
-        ("利润环比下降", row.get("利润环比"), lambda value: value < HOME_OPERATING_ANOMALY_THRESHOLDS["利润环比下降"]),
-        ("成本费用环比上升", row.get("成本费用环比"), lambda value: value > HOME_OPERATING_ANOMALY_THRESHOLDS["成本费用环比上升"]),
-        ("净利率明显下滑", row.get("净利率变化"), lambda value: value < HOME_OPERATING_ANOMALY_THRESHOLDS["净利率明显下滑"]),
-    ]
     labels: list[str] = []
     degrees: list[float] = []
-    for label, value, predicate in checks:
-        if value is None or pd.isna(value):
-            continue
+
+    def add_numeric(label: str, value, predicate) -> None:
+        if value is None or isinstance(value, str):
+            return
+        try:
+            if pd.isna(value):
+                return
+        except (TypeError, ValueError):
+            return
         numeric = _safe_float(value)
         if predicate(numeric):
             labels.append(label)
             degrees.append(abs(numeric))
+
+    def add_profit(label: str, value) -> None:
+        if value is None:
+            return
+        if isinstance(value, str):
+            if value in {"由盈转亏", "亏损扩大"}:
+                labels.append(f"{label}（{value}）")
+                degrees.append(1.0)
+            return
+        try:
+            if pd.isna(value):
+                return
+        except (TypeError, ValueError):
+            return
+        numeric = _safe_float(value)
+        if numeric < HOME_OPERATING_ANOMALY_THRESHOLDS[label]:
+            labels.append(label)
+            degrees.append(abs(numeric))
+
+    add_numeric("收入同比下降", row.get("收入同比"), lambda value: value < HOME_OPERATING_ANOMALY_THRESHOLDS["收入同比下降"])
+    add_numeric("收入环比下降", row.get("收入环比"), lambda value: value < HOME_OPERATING_ANOMALY_THRESHOLDS["收入环比下降"])
+    add_profit("利润同比下降", row.get("利润同比"))
+    add_profit("利润环比下降", row.get("利润环比"))
+    add_numeric("成本费用环比上升", row.get("成本费用环比"), lambda value: value > HOME_OPERATING_ANOMALY_THRESHOLDS["成本费用环比上升"])
+    add_numeric("净利率明显下滑", row.get("净利率变化"), lambda value: value < HOME_OPERATING_ANOMALY_THRESHOLDS["净利率明显下滑"])
+
     if not labels:
         return None
     degree = max(degrees) if degrees else 0.0
@@ -3230,7 +4362,7 @@ def _home_anomaly_row_from_comparison(row: pd.Series) -> dict | None:
         "净利率变化": row.get("净利率变化"),
         "异常类型": "、".join(labels),
         "异常程度": degree,
-        "异常程度/状态": "需关注",
+        "异常程度/状态": "高风险" if any("由盈转亏" in label or "亏损扩大" in label for label in labels) else "需关注",
     }
 
 
@@ -3320,12 +4452,9 @@ def _render_operating_anomaly_panel(detail: pd.DataFrame | dict[str, int], selec
     body = f"""
         <div class="home-card-mini">{"".join(rows)}</div>
         <div class="home-anomaly-tags">{tag_html or '<span class="home-anomaly-tag">当前范围暂无经营波动异常</span>'}</div>
-        <div class="home-card-note-grid">
-            <div class="home-card-note">异常范围<strong>同比/环比经营波动</strong></div>
-            <div class="home-card-note">口径状态<strong>沿用现有阈值</strong></div>
-        </div>
+        <div class="home-card-footnote">按异常事项数统计；缺可比期间不计入异常</div>
     """
-    panel = _panel_html("经营异常", "同比/环比经营波动，不含导入和数据质量异常", body)
+    panel = _panel_html("经营异常", "同比/环比经营波动", body)
     return _home_card_group_wrap("operating_anomaly", selected_group_key, panel)
 
 
@@ -3530,6 +4659,393 @@ def _set_sidebar_page(page_key: str, module_name: str) -> None:
         st.session_state["base_settings_active_tab"] = BASE_SETTINGS_PAGE_TABS[page_key]
 
 
+UI_FONT_SIZE_SESSION_KEY = "ui_font_size_mode"
+UI_FONT_SIZE_QUERY_KEY = "ui_font"
+UI_FONT_SIZE_DEFAULT_MODE = "较大"
+UI_FONT_SIZE_MODES: dict[str, float] = {
+    "标准": 1.0,
+    "较大": 1.12,
+    "大号": 1.25,
+}
+
+
+def _normalize_ui_font_size_mode(value: str | None) -> str:
+    text = str(value or "").strip()
+    return text if text in UI_FONT_SIZE_MODES else UI_FONT_SIZE_DEFAULT_MODE
+
+
+def _current_ui_font_size_mode() -> str:
+    stored_exists = UI_FONT_SIZE_SESSION_KEY in st.session_state
+    stored_mode = st.session_state.get(UI_FONT_SIZE_SESSION_KEY)
+    query_mode = _get_query_param(UI_FONT_SIZE_QUERY_KEY)
+    if query_mode is not None:
+        mode = _normalize_ui_font_size_mode(query_mode)
+    elif stored_mode is not None:
+        mode = _normalize_ui_font_size_mode(stored_mode)
+    else:
+        mode = UI_FONT_SIZE_DEFAULT_MODE
+    if not stored_exists:
+        st.session_state[UI_FONT_SIZE_SESSION_KEY] = mode
+    elif query_mode is not None and _normalize_ui_font_size_mode(stored_mode) != mode:
+        try:
+            st.session_state[UI_FONT_SIZE_SESSION_KEY] = mode
+        except Exception:
+            pass
+    return mode
+
+
+def _sync_ui_font_size_query_param(mode: str) -> None:
+    normalized = _normalize_ui_font_size_mode(mode)
+    if not hasattr(st, "query_params"):
+        return
+    try:
+        if normalized == UI_FONT_SIZE_DEFAULT_MODE:
+            if UI_FONT_SIZE_QUERY_KEY in st.query_params:
+                del st.query_params[UI_FONT_SIZE_QUERY_KEY]
+        else:
+            st.query_params[UI_FONT_SIZE_QUERY_KEY] = normalized
+    except Exception:
+        return
+
+
+def _app_query_href(params: dict[str, str] | None = None) -> str:
+    query_items: list[tuple[str, str]] = []
+    mode = _current_ui_font_size_mode()
+    if mode != UI_FONT_SIZE_DEFAULT_MODE:
+        query_items.append((UI_FONT_SIZE_QUERY_KEY, mode))
+    for key, value in (params or {}).items():
+        if value is not None and str(value):
+            query_items.append((str(key), str(value)))
+    if not query_items:
+        return "?"
+    return "?" + "&".join(f"{quote(key)}={quote(value)}" for key, value in query_items)
+
+
+def _ui_font_size_scale(mode: str | None) -> float:
+    return UI_FONT_SIZE_MODES[_normalize_ui_font_size_mode(mode)]
+
+
+def _render_ui_font_size_css(mode: str | None = None) -> str:
+    scale = _ui_font_size_scale(mode)
+    if scale == 1.0:
+        return '<style id="ui-font-size-control">:root { --ui-font-scale: 1; }</style>'
+    return f"""
+<style id="ui-font-size-control">
+    :root {{
+        --ui-font-scale: {scale:.2f};
+        --ui-font-body: calc(1rem * var(--ui-font-scale));
+        --ui-font-small: calc(0.86rem * var(--ui-font-scale));
+        --ui-font-label: calc(0.94rem * var(--ui-font-scale));
+        --ui-font-title: calc(1.5rem * var(--ui-font-scale));
+        --ui-font-kpi: calc(2rem * var(--ui-font-scale));
+        --ui-font-table: calc(0.90rem * var(--ui-font-scale));
+        --ui-font-table-head: calc(0.95rem * var(--ui-font-scale));
+        --ui-font-caption: calc(0.82rem * var(--ui-font-scale));
+        --ui-font-chip: calc(0.78rem * var(--ui-font-scale));
+    }}
+
+    .stApp,
+    section[data-testid="stSidebar"],
+    .stApp p,
+    section[data-testid="stSidebar"] p,
+    .stApp li,
+    .stApp label,
+    section[data-testid="stSidebar"] label,
+    .stApp input,
+    .stApp textarea,
+    .stApp select,
+    .stApp button,
+    section[data-testid="stSidebar"] button,
+    .stApp [role="combobox"],
+    .stApp [data-baseweb="select"] *,
+    .stApp [data-baseweb="tab"],
+    .stApp [data-testid="stMarkdownContainer"],
+    .stApp [data-testid="stMarkdownContainer"] p {{
+        font-size: var(--ui-font-body) !important;
+        line-height: 1.42 !important;
+    }}
+
+    .page-header,
+    .picture-brief-page-title {{
+        font-size: var(--ui-font-title) !important;
+        line-height: 1.25 !important;
+    }}
+
+    .card,
+    .bi-panel,
+    .home-filter-card,
+    .sidebar-note,
+    .stApp .stTabs,
+    .stApp [data-testid="stExpander"] {{
+        font-size: var(--ui-font-body) !important;
+        line-height: 1.45 !important;
+    }}
+
+    .app-title {{
+        font-size: calc(1.36rem * var(--ui-font-scale)) !important;
+        line-height: 1.16 !important;
+    }}
+
+    .app-subtitle,
+    .nav-section-title,
+    .sidebar-font-control-title,
+    [class*="st-key-ui_font_size_mode"] label [data-testid="stMarkdownContainer"] p {{
+        font-size: var(--ui-font-small) !important;
+        line-height: 1.25 !important;
+    }}
+
+    [class*="st-key-ui_font_size_mode"] label [data-testid="stMarkdownContainer"] p {{
+        font-size: min(calc(0.76rem * var(--ui-font-scale)), 0.80rem) !important;
+        line-height: 1.18 !important;
+    }}
+
+    [class*="st-key-nav_module_toggle_"] button,
+    [class*="st-key-nav_module_toggle_"] button p {{
+        font-size: calc(1rem * var(--ui-font-scale)) !important;
+        line-height: 1.22 !important;
+    }}
+
+    [class*="st-key-nav_"]:not([class*="st-key-nav_module_toggle_"]) button,
+    [class*="st-key-nav_"]:not([class*="st-key-nav_module_toggle_"]) button p {{
+        font-size: calc(0.92rem * var(--ui-font-scale)) !important;
+        line-height: 1.24 !important;
+    }}
+
+    .home-top-kpi-grid .bi-kpi-label {{
+        font-size: calc(1.03rem * var(--ui-font-scale)) !important;
+        line-height: 1.22 !important;
+    }}
+
+    .home-top-kpi-grid .bi-kpi-value {{
+        font-size: var(--ui-font-kpi) !important;
+        line-height: 1.08 !important;
+    }}
+
+    .home-top-kpi-grid .bi-kpi-delta,
+    .home-top-kpi-grid .bi-kpi-trends {{
+        font-size: var(--ui-font-label) !important;
+        line-height: 1.28 !important;
+    }}
+
+    .bi-kpi-grid:not(.home-top-kpi-grid) .bi-kpi-label {{
+        font-size: calc(0.78rem * var(--ui-font-scale)) !important;
+        line-height: 1.22 !important;
+    }}
+
+    .bi-kpi-grid:not(.home-top-kpi-grid) .bi-kpi-value {{
+        font-size: calc(1.42rem * var(--ui-font-scale)) !important;
+        line-height: 1.15 !important;
+    }}
+
+    .bi-kpi-grid:not(.home-top-kpi-grid) .bi-kpi-delta {{
+        font-size: calc(0.76rem * var(--ui-font-scale)) !important;
+        line-height: 1.28 !important;
+    }}
+
+    .bi-kpi-grid:not(.home-top-kpi-grid) .bi-kpi-trends {{
+        font-size: calc(0.72rem * var(--ui-font-scale)) !important;
+        line-height: 1.28 !important;
+    }}
+
+    .bi-panel-title,
+    .home-card-group-grid .bi-panel-title,
+    .home-card-group-company-profit-rank .bi-panel-title,
+    .home-detail-panel-title,
+    .home-detail-modal h3 {{
+        font-size: calc(1.32rem * var(--ui-font-scale)) !important;
+        line-height: 1.22 !important;
+    }}
+
+    .bi-panel-subtitle,
+    .home-card-footnote,
+    .home-detail-panel-subtitle,
+    .home-detail-unit-note {{
+        font-size: var(--ui-font-label) !important;
+        line-height: 1.4 !important;
+    }}
+
+    .home-card-mini-row,
+    .home-card-mini-label,
+    .home-card-mini-value,
+    .home-card-note,
+    .home-card-note strong,
+    .home-budget-compare-label,
+    .home-budget-compare-value,
+    .home-budget-compare-gap,
+    .home-budget-time-label,
+    .home-budget-status-line,
+    .home-expense-legend-name,
+    .home-expense-legend-meta,
+    .home-risk-list-row,
+    .home-risk-list-title,
+    .home-funds-assurance-label,
+    .home-funds-assurance-value,
+    .home-funds-assurance-conclusion {{
+        font-size: var(--ui-font-body) !important;
+        line-height: 1.35 !important;
+    }}
+
+    .home-detail-modal,
+    .home-detail-modal p,
+    .home-detail-table,
+    .home-detail-table th,
+    .home-detail-table td,
+    .sticky-table-wrap table,
+    .sticky-table-wrap th,
+    .sticky-table-wrap td,
+    .operating-summary-sticky-scroll table,
+    .operating-summary-sticky-scroll th,
+    .operating-summary-sticky-scroll td,
+    .profit-original-table,
+    .profit-original-table th,
+    .profit-original-table td,
+    .funds-warning-table,
+    .funds-warning-table th,
+    .funds-warning-table td,
+    .picture-brief-table,
+    .picture-brief-table th,
+    .picture-brief-table td,
+    .picture-brief-template-skin .template-sheet,
+    .picture-brief-template-skin .template-sheet td,
+    .detail-query-table,
+    .detail-query-table th,
+    .detail-query-table td,
+    .financial-table,
+    .financial-table th,
+    .financial-table td,
+    .stApp table,
+    .stApp th,
+    .stApp td {{
+        font-size: var(--ui-font-table) !important;
+        line-height: 1.42 !important;
+    }}
+
+    .stApp table th,
+    .home-detail-table th,
+    .sticky-table-wrap th,
+    .operating-summary-sticky-scroll th,
+    .profit-original-table th,
+    .funds-warning-table th,
+    .picture-brief-table th,
+    .picture-brief-template-skin .template-sheet tbody tr:first-child td,
+    .picture-brief-template-skin .template-sheet tr.template-header-row td,
+    .picture-brief-template-skin .template-sheet tr.template-section-row td,
+    .detail-query-table th,
+    .financial-table th,
+    .income-statement-table th,
+    .budget-comparison-table th,
+    .budget-drill-table th {{
+        font-size: var(--ui-font-table-head) !important;
+        line-height: 1.35 !important;
+        font-weight: 850 !important;
+    }}
+
+    .budget-comparison-table td,
+    .budget-comparison-table .budget-table-text,
+    .budget-comparison-table .budget-table-num,
+    .budget-comparison-table .budget-module-link,
+    .budget-drill-table td,
+    .budget-drill-table .budget-drill-text,
+    .budget-drill-table .budget-drill-num,
+    .budget-drill-table .budget-drill-center,
+    .income-statement-table td,
+    .funds-warning-text,
+    .funds-warning-num,
+    .picture-brief-table td,
+    .picture-brief-template-skin .template-sheet td,
+    .profit-original-table td {{
+        font-size: var(--ui-font-table) !important;
+        line-height: 1.42 !important;
+    }}
+
+    .budget-status-ok,
+    .budget-status-lag,
+    .budget-drill-status-ok,
+    .budget-drill-status-lag,
+    .budget-drill-status-wait,
+    .funds-warning-status,
+    .picture-brief-empty {{
+        font-size: var(--ui-font-chip) !important;
+        line-height: 1.22 !important;
+    }}
+
+    .budget-unit-note,
+    .budget-drill-unit,
+    .budget-bridge-note,
+    .funds-warning-filter-note,
+    .funds-warning-table-head span,
+    .funds-warning-note,
+    .profit-original-meta-sub,
+    .profit-original-card-tip,
+    .focus-expense-meta,
+    .focus-expense-note,
+    .picture-brief-note,
+    .picture-brief-note li,
+    .picture-brief-trend-note,
+    .detail-query-limit-note,
+    .base-company-node-code {{
+        font-size: var(--ui-font-caption) !important;
+        line-height: 1.5 !important;
+    }}
+
+    .budget-kpi-title,
+    .funds-warning-card-label,
+    .profit-original-card-title,
+    .focus-expense-title,
+    .picture-brief-kpi .label,
+    .picture-brief-section h3,
+    .funds-warning-table-head h3,
+    .profit-original-meta-title,
+    .base-company-node-title {{
+        font-size: var(--ui-font-label) !important;
+        line-height: 1.32 !important;
+    }}
+
+    .budget-kpi-value,
+    .funds-warning-card-value,
+    .focus-expense-value,
+    .picture-brief-kpi .value {{
+        font-size: calc(1.55rem * var(--ui-font-scale)) !important;
+        line-height: 1.16 !important;
+    }}
+
+    .budget-kpi-sub,
+    .budget-kpi-delta {{
+        font-size: var(--ui-font-caption) !important;
+        line-height: 1.45 !important;
+    }}
+
+    .stApp [data-testid="stDataFrame"],
+    .stApp [data-testid="stDataFrame"] * {{
+        font-size: var(--ui-font-table) !important;
+    }}
+
+    .stApp .stButton button,
+    .stApp button[kind],
+    .stApp [data-testid^="stBaseButton"] {{
+        font-size: var(--ui-font-label) !important;
+        line-height: 1.28 !important;
+    }}
+</style>
+"""
+
+
+def _render_ui_font_size_control() -> None:
+    _current_ui_font_size_mode()
+    st.markdown(
+        '<div class="sidebar-font-control-title">显示字号</div>',
+        unsafe_allow_html=True,
+    )
+    st.radio(
+        "显示字号",
+        list(UI_FONT_SIZE_MODES),
+        key=UI_FONT_SIZE_SESSION_KEY,
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+    _sync_ui_font_size_query_param(st.session_state.get(UI_FONT_SIZE_SESSION_KEY, UI_FONT_SIZE_DEFAULT_MODE))
+
+
 def render_sidebar():
     with st.sidebar:
         st.markdown(
@@ -3599,6 +5115,7 @@ def render_sidebar():
                         args=(item, page_module.get(item, module_name)),
                     )
 
+        _render_ui_font_size_control()
         st.markdown('<div class="sidebar-note">本地数据仓库 · SQLite</div>', unsafe_allow_html=True)
     return current
 
@@ -4713,8 +6230,9 @@ def _operating_card_group_label(group_key: str | None) -> str | None:
 
 
 def _operating_card_group_link(group_key: str, label: str) -> str:
+    href = _app_query_href({"home_group": "operating_summary", "home_group_view": str(group_key)})
     return (
-        f'<a class="home-detail-row-link" href="?home_group=operating_summary&home_group_view={quote(str(group_key))}" '
+        f'<a class="home-detail-row-link" href="{_html(href)}" '
         f'target="_top" title="查看{_html(label)}公司明细">{_html(label)}</a>'
     )
 
@@ -5314,7 +6832,11 @@ def _metric_drilldown_value_html(column: str, value) -> tuple[str, str]:
         display = f"{number_value:,.2f}"
     else:
         empty_display = "暂无" if any(token in text for token in ("环比", "同比")) else "-"
-        display = empty_display if value is None or (isinstance(value, float) and pd.isna(value)) else str(value)
+        try:
+            is_missing = value is None or bool(pd.isna(value))
+        except (TypeError, ValueError):
+            is_missing = value is None
+        display = empty_display if is_missing else str(value)
 
     if number_value is not None and number_value < 0:
         class_names.append("neg")
@@ -5339,7 +6861,7 @@ def _metric_drilldown_value_html(column: str, value) -> tuple[str, str]:
 
 def _metric_drilldown_column_class(column: str) -> str:
     text = str(column)
-    if text in {"公司", "经营单位", "模块组/公司"}:
+    if text in {"公司", "经营单位", "模块组/公司", "模块/公司"}:
         return "col-company"
     if text in {"业务板块", "模块", "费用类别", "明细类型"}:
         return "col-text"
@@ -5377,15 +6899,15 @@ def _metric_drilldown_sort_href(
     else:
         icon = "⇅"
         icon_class = "home-detail-sort"
-    params = [
-        (key_param, str(metric_key)),
-        (sort_param, str(column)),
-        (order_param, next_order),
-    ]
+    params = {
+        key_param: str(metric_key),
+        sort_param: str(column),
+        order_param: next_order,
+    }
     for param_key, param_value in (extra_params or {}).items():
         if param_value is not None and str(param_value):
-            params.append((param_key, str(param_value)))
-    href = "?" + "&".join(f"{quote(str(param_key))}={quote(str(param_value))}" for param_key, param_value in params)
+            params[str(param_key)] = str(param_value)
+    href = _app_query_href(params)
     return href, icon, icon_class
 
 
@@ -5394,17 +6916,30 @@ def _sort_metric_drilldown_df(df: pd.DataFrame, sort_column: str | None, sort_or
         return df
     ascending = str(sort_order or "asc").lower() != "desc"
     sorted_df = df.copy()
+    first_column = sorted_df.columns[0] if len(sorted_df.columns) else None
+    total_mask = pd.Series(False, index=sorted_df.index)
+    if first_column is not None:
+        total_mask = sorted_df[first_column].astype(str).str.replace(r"<[^>]+>", "", regex=True).str.strip().isin({"合计"})
+        sortable_df = sorted_df[~total_mask].copy()
+        total_df = sorted_df[total_mask].copy()
+    else:
+        sortable_df = sorted_df
+        total_df = sorted_df.iloc[0:0].copy()
     column_class = _metric_drilldown_column_class(str(sort_column))
     if column_class in {"col-number", "col-percent"}:
-        numeric_values = pd.to_numeric(sorted_df[sort_column], errors="coerce")
-        sorted_df["_sort_value"] = numeric_values
-        return sorted_df.sort_values("_sort_value", ascending=ascending, na_position="last").drop(columns=["_sort_value"])
-    return sorted_df.sort_values(
-        sort_column,
-        ascending=ascending,
-        na_position="last",
-        key=lambda series: series.astype(str).str.replace(r"<[^>]+>", "", regex=True),
-    )
+        numeric_values = pd.to_numeric(sortable_df[sort_column], errors="coerce")
+        sortable_df["_sort_value"] = numeric_values
+        sorted_result = sortable_df.sort_values("_sort_value", ascending=ascending, na_position="last").drop(columns=["_sort_value"])
+    else:
+        sorted_result = sortable_df.sort_values(
+            sort_column,
+            ascending=ascending,
+            na_position="last",
+            key=lambda series: series.astype(str).str.replace(r"<[^>]+>", "", regex=True),
+        )
+    if not total_df.empty:
+        sorted_result = pd.concat([sorted_result, total_df], ignore_index=True)
+    return sorted_result
 
 
 def _metric_drilldown_colgroup_html(columns: list[str]) -> str:
@@ -5511,7 +7046,7 @@ def _render_metric_drilldown_layer(
         f'{_html(_home_period_label(period))} · 范围：{_html(scope_label)} · 点击后按需加载明细'
         '</div>'
         '</div>'
-        '<a class="home-detail-close" href="?" target="_top" title="关闭详情层" aria-label="关闭详情层">×</a>'
+        f'<a class="home-detail-close" href="{_html(_app_query_href())}" target="_top" title="关闭详情层" aria-label="关闭详情层">×</a>'
         '</div>'
         f'<div class="home-detail-body">{table_html}</div>'
         '</div>'
@@ -5643,11 +7178,12 @@ def _render_home_card_group_layer(
         extra_params={"home_group_view": detail_key} if detail_label else None,
     )
     back_html = (
-        '<a class="home-detail-back" href="?home_group=operating_summary" target="_top">← 返回模块组汇总</a>'
+        f'<a class="home-detail-back" href="{_html(_app_query_href({"home_group": "operating_summary"}))}" target="_top">← 返回模块组汇总</a>'
         if detail_label
         else ""
     )
     bridge_html = _home_company_rank_bridge_html(period, company_codes) if group_key == "company_profit_rank" else ""
+    unit_html = '<div class="home-detail-unit-note">单位：万元</div>' if group_key == "expense_analysis" else ""
     title = f'{cfg["title"]} · {detail_label}' if detail_label else cfg["title"]
     detail_html = (
         '<div class="home-detail-overlay">'
@@ -5661,9 +7197,9 @@ def _render_home_card_group_layer(
         '</div>'
         f'{bridge_html}'
         '</div>'
-        '<a class="home-detail-close" href="?" target="_top" title="关闭详情层" aria-label="关闭详情层">×</a>'
+        f'<a class="home-detail-close" href="{_html(_app_query_href())}" target="_top" title="关闭详情层" aria-label="关闭详情层">×</a>'
         '</div>'
-        f'<div class="home-detail-body">{table_html}</div>'
+        f'<div class="home-detail-body">{unit_html}{table_html}</div>'
         '</div>'
         '</div>'
     )
@@ -5812,7 +7348,12 @@ def render_home():
         for metric_key, cfg in HOME_DRILL_CONFIG.items()
     }
     drill_metric = _get_query_param("drill_metric")
-    _render_bi_kpi_grid(kpis, drill_label_map=drill_label_map, selected_metric_key=drill_metric)
+    _render_bi_kpi_grid(
+        kpis,
+        drill_label_map=drill_label_map,
+        selected_metric_key=drill_metric,
+        extra_grid_class="home-top-kpi-grid",
+    )
     st.caption("提示：点击 KPI 数值可在当前页下钻到下一层级，查看构成明细。")
 
     if drill_metric in HOME_DRILL_CONFIG:
@@ -5839,13 +7380,13 @@ def render_home():
 
     _render_html(
         f"""
-        <div class="bi-section-grid">
+        <div class="bi-section-grid home-card-group-grid">
             {_render_budget_execution_panel(_home_budget_summary_for_scope(period, filtered_company_codes), selected_home_group)}
             {_render_operating_summary_panel(_home_operating_summary_for_scope(period, tuple(filtered_company_codes)), selected_home_group)}
             {_render_expense_analysis_panel(expense_analysis, selected_home_group)}
+            {_render_operating_anomaly_panel(operating_anomaly_counts, selected_home_group)}
             {_render_company_profit_rank_panel(company_rank_summary, selected_home_group)}
             {_render_funds_safety_panel(funds_summary, selected_home_group)}
-            {_render_operating_anomaly_panel(operating_anomaly_counts, selected_home_group)}
             {_render_funds_turnover_risk_panel(funds_summary, selected_home_group)}
         </div>
         """
@@ -12634,9 +14175,10 @@ def _render_budget_comparison_table(
         if module == "合计":
             first_cell = _budget_table_td_html(module, first=True, total=True)
         else:
+            href = _app_query_href({"budget_drill": module})
             first_cell = (
                 '<td class="budget-table-cell budget-table-first">'
-                f'<a class="budget-module-link" target="_top" href="?budget_drill={quote(module, safe="")}">{_html(module)}</a>'
+                f'<a class="budget-module-link" target="_top" href="{_html(href)}">{_html(module)}</a>'
                 '</td>'
             )
         cells = [first_cell]
@@ -12733,7 +14275,7 @@ def _budget_bridge_note_html(module_name: str, bridge: dict) -> str:
     if not bridge:
         return ""
     return f"""
-    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0 12px;padding:10px 12px;border:1px solid #dbe5f2;border-radius:10px;background:#f8fbff;color:#334155;font-size:12px;font-weight:750;">
+    <div class="budget-bridge-note" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0 12px;padding:10px 12px;border:1px solid #dbe5f2;border-radius:10px;background:#f8fbff;color:#334155;font-size:12px;font-weight:750;">
       <span>{_html(module_name)}主表采用合并口径；下钻为单体原始本年累计。</span>
       <span>单体收入合计 <b>{_html(_fmt_budget_wan(bridge.get("raw_income")))}</b></span>
       <span>减内部抵消 <b>{_html(_fmt_budget_wan(bridge.get("income_adjustment")))}</b></span>
@@ -12951,22 +14493,29 @@ def render_budget_dashboard():
     st.markdown('<div class="page-header">全面预算</div>', unsafe_allow_html=True)
     st.caption(f"{BUDGET_VERSION} · 第一版只看收入预算、利润预算和经营单位完成进度。")
 
-    years, months = _get_year_month_options("income_statement")
+    actual_months_by_year = _budget_actual_period_months()
+    years = sorted(set(actual_months_by_year) | {_home_budget_plan_year() or "2026"}, reverse=True)
     if not years:
         years = ["2026"]
-    if not months:
-        months = [f"{idx:02d}" for idx in range(1, 13)]
+    month_options, has_actual_months = _prepare_budget_year_month_state(years, actual_months_by_year)
     c1, c2, c3, c4, c5 = st.columns([0.85, 0.85, 1.15, 1.55, 0.95], gap="small")
     with c1:
-        selected_year = st.selectbox("年份", years, index=0, key="budget_year")
+        selected_year = st.selectbox("年份", years, key="budget_year")
+        if selected_year != st.session_state.get("_budget_last_seen_year"):
+            current_months = actual_months_by_year.get(selected_year, [])
+            if current_months:
+                st.session_state["budget_month"] = current_months[-1]
+                month_options = current_months
+                has_actual_months = True
+            else:
+                month_options = [f"{idx:02d}" for idx in range(1, 13)]
+                st.session_state["budget_month"] = _budget_default_month(month_options, False)
+                has_actual_months = False
     with c2:
-        default_month = "03" if "03" in months else months[0]
-        selected_month = st.selectbox(
-            "月份",
-            months,
-            index=months.index(default_month) if default_month in months else 0,
-            key="budget_month",
-        )
+        if st.session_state.get("budget_month") not in month_options:
+            st.session_state["budget_month"] = _budget_default_month(month_options, bool(actual_months_by_year.get(selected_year)))
+        selected_month = st.selectbox("月份", month_options, key="budget_month")
+        st.session_state["_budget_last_seen_year"] = selected_year
     with c3:
         st.selectbox("经营单位", ["1 集团"], key="budget_scope", disabled=True)
     with c4:
@@ -12976,6 +14525,8 @@ def render_budget_dashboard():
         st.button("查询预算", type="primary", icon=":material/search:", key="budget_query", use_container_width=True)
 
     period = f"{selected_year}{selected_month}"
+    if not has_actual_months:
+        st.info(f"{selected_year} 年暂无可用于预算实际数的收入成本费用表本年累计数据，月份暂按安全默认值显示。")
     plan_df = read_budget_plan()
     if plan_df.empty:
         st.warning(_budget_missing_file_message())
@@ -13615,6 +15166,80 @@ def _base_settings_alias_conflicts() -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def _shared_name_mapping_file_status() -> dict:
+    path = get_shared_name_mapping_path()
+    status = {
+        "path": str(path),
+        "exists": path.exists(),
+        "record_count": None,
+        "conflict_count": None,
+        "generated_at": "",
+        "error": "",
+    }
+    if not path.exists():
+        return status
+    try:
+        import json
+
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        status["record_count"] = len(payload.get("records") or [])
+        status["conflict_count"] = len(payload.get("conflicts") or [])
+        status["generated_at"] = payload.get("generated_at") or ""
+    except Exception as exc:
+        status["error"] = str(exc)
+    return status
+
+
+def _render_shared_name_mapping_status() -> None:
+    snapshot = build_shared_name_mapping_snapshot()
+    stats = snapshot.get("stats", {})
+    file_status = _shared_name_mapping_file_status()
+
+    st.markdown("#### 共享映射状态")
+    st.caption(
+        "finance_dw 是公司名称、简称、校区名和历史别名的唯一维护入口；资金管理模块只读消费发布后的 JSON 快照。"
+    )
+    cols = st.columns(4)
+    cols[0].metric("可发布记录", _base_metric_value(stats.get("record_count")))
+    cols[1].metric("覆盖公司", _base_metric_value(stats.get("company_count")))
+    cols[2].metric("冲突别名", _base_metric_value(stats.get("conflict_count")))
+    cols[3].metric("未唯一匹配校区名", _base_metric_value(stats.get("unmatched_alias_count")))
+
+    status_rows = pd.DataFrame(
+        [
+            ("快照路径", file_status["path"]),
+            ("路径来源", f"{SHARED_NAME_MAPPING_ENV} 或默认 data/shared_name_mapping.json"),
+            ("最近发布时间", file_status.get("generated_at") or "尚未发布"),
+            ("已发布记录数", _base_metric_value(file_status.get("record_count")) if file_status.get("exists") else "尚未发布"),
+        ],
+        columns=["项目", "内容"],
+    ).astype(str)
+    st.dataframe(status_rows, use_container_width=True, hide_index=True, height=180)
+
+    if file_status.get("error"):
+        st.warning(f"当前快照无法读取：{file_status['error']}")
+    if snapshot.get("conflicts"):
+        st.error("存在启用别名指向多个公司编码，已阻止发布。")
+        st.dataframe(pd.DataFrame(snapshot["conflicts"]), use_container_width=True, hide_index=True, height=180)
+    if snapshot.get("unmatched_aliases"):
+        with st.expander(f"未唯一匹配校区名 {len(snapshot['unmatched_aliases'])} 条", expanded=False):
+            st.dataframe(pd.DataFrame(snapshot["unmatched_aliases"]), use_container_width=True, hide_index=True, height=220)
+
+    if st.button(
+        "发布 / 更新共享映射快照",
+        key="base_settings_publish_shared_name_mapping",
+        type="primary",
+        use_container_width=True,
+        disabled=bool(snapshot.get("conflicts")),
+    ):
+        try:
+            result = publish_shared_name_mapping_snapshot()
+            st.success(f"已发布 {result.get('record_count', 0)} 条共享映射：{result.get('path')}")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"共享映射发布失败：{exc}")
+
+
 def _base_metric_value(value) -> str:
     if value is None:
         return "待接入"
@@ -14061,6 +15686,8 @@ def _render_base_settings_naming():
         else:
             st.info("未识别到候选公司。")
 
+    _render_shared_name_mapping_status()
+
     alias_df = _base_settings_alias_rows()
     st.markdown("#### 公司别名")
     if len(alias_df):
@@ -14457,6 +16084,7 @@ def render_footer():
 def main():
     st.markdown(PAGE_CSS, unsafe_allow_html=True)
     init_app()
+    st.markdown(_render_ui_font_size_css(_current_ui_font_size_mode()), unsafe_allow_html=True)
     choice = render_sidebar()
     page_map = {
         "首页": render_home,
@@ -14494,6 +16122,7 @@ def main():
     with page_slot.container():
         page_map.get(choice, render_home)()
         render_footer()
+    st.session_state["_last_rendered_page"] = choice
 
 if __name__ == "__main__":
     main()

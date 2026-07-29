@@ -97,6 +97,121 @@ def test_sidebar_render_uses_buttons_not_single_select_pills():
     assert "nav_module_toggle_" in source
     assert 'button_type = "primary" if (is_active_module or is_expanded) else "secondary"' in source
     assert 'item_type = "primary" if current == item else "secondary"' in source
+    assert "_render_ui_font_size_control()" in source
+    assert source.index("_render_ui_font_size_control()") < source.index("sidebar-note")
+
+
+def test_global_font_size_control_modes_and_standard_baseline():
+    assert app.UI_FONT_SIZE_SESSION_KEY == "ui_font_size_mode"
+    assert app.UI_FONT_SIZE_QUERY_KEY == "ui_font"
+    assert app.UI_FONT_SIZE_DEFAULT_MODE == "较大"
+    assert app.UI_FONT_SIZE_MODES == {"标准": 1.0, "较大": 1.12, "大号": 1.25}
+    assert app._normalize_ui_font_size_mode(None) == "较大"
+    assert app._normalize_ui_font_size_mode("未知") == "较大"
+    assert app._normalize_ui_font_size_mode("标准") == "标准"
+    assert app._ui_font_size_scale("较大") == 1.12
+    assert app._ui_font_size_scale("大号") == 1.25
+
+    standard_css = app._render_ui_font_size_css("标准")
+    larger_css = app._render_ui_font_size_css("较大")
+    large_css = app._render_ui_font_size_css("大号")
+
+    assert "--ui-font-scale: 1;" in standard_css
+    assert "font-size:" not in standard_css
+    assert "--ui-font-scale: 1.12;" in larger_css
+    assert "--ui-font-scale: 1.25;" in large_css
+    assert "--ui-font-table:" in larger_css
+    assert "--ui-font-table-head:" in larger_css
+    assert "--ui-font-caption:" in larger_css
+    assert "--ui-font-chip:" in larger_css
+    assert "zoom" not in larger_css
+    assert "transform:" not in larger_css
+    assert "section[data-testid=\"stSidebar\"]" in larger_css
+    assert ".page-header" in larger_css
+    assert ".home-top-kpi-grid .bi-kpi-value" in larger_css
+    assert ".bi-kpi-grid:not(.home-top-kpi-grid) .bi-kpi-value" in larger_css
+    assert "calc(1.42rem * var(--ui-font-scale))" in larger_css
+    assert ".home-top-kpi-grid .bi-kpi-value,\n    .bi-kpi-value" not in larger_css
+    assert ".home-top-kpi-grid .bi-kpi-label,\n    .bi-kpi-label" not in larger_css
+    assert ".home-card-group-grid" in larger_css
+    assert ".home-detail-modal" in larger_css
+    assert ".home-detail-table th" in larger_css
+    assert ".budget-comparison-table th" in larger_css
+    assert ".budget-comparison-table td" in larger_css
+    assert ".budget-drill-table th" in larger_css
+    assert ".budget-drill-table td" in larger_css
+    assert ".budget-status-ok" in larger_css
+    assert ".budget-bridge-note" in larger_css
+    assert ".operating-summary-sticky-scroll table" in larger_css
+    assert ".profit-original-table" in larger_css
+    assert ".income-statement-table th" in larger_css
+    assert ".funds-warning-table" in larger_css
+    assert ".funds-warning-card-value" in larger_css
+    assert ".picture-brief-table" in larger_css
+    assert ".picture-brief-template-skin .template-sheet" in larger_css
+    assert ".picture-brief-kpi .value" in larger_css
+    assert ".stApp [data-baseweb=\"select\"]" in larger_css
+    assert ".stApp [data-baseweb=\"tab\"]" in larger_css
+    assert 'font-size: min(calc(0.76rem * var(--ui-font-scale)), 0.80rem)' in larger_css
+
+
+def test_sidebar_font_size_control_keeps_text_readable_on_dark_sidebar():
+    css = app.PAGE_CSS
+    control_start = css.index('[class*="st-key-ui_font_size_mode"] {')
+    control_end = css.index(".bi-section-grid", control_start)
+    control_css = css[control_start:control_end]
+
+    assert "#d7e3f1" in control_css
+    assert "#ffffff" in control_css
+    assert "label:has(input:checked)" in control_css
+    assert "background: #2563eb" in control_css
+    assert "label:has(input:focus-visible)" in control_css
+    assert "outline: 2px solid #93c5fd" in control_css
+    assert "label:hover p" in control_css
+    assert "overflow: visible" in control_css
+    assert "st-key-ui_font_size_mode" in control_css
+
+
+def test_global_font_size_query_links_preserve_nonstandard_mode():
+    app.st.session_state[app.UI_FONT_SIZE_SESSION_KEY] = "大号"
+
+    href = app._app_query_href({"drill_metric": "revenue"})
+    close_href = app._app_query_href()
+    sort_href, _, _ = app._metric_drilldown_sort_href("revenue", "公司", None, None)
+
+    assert href.startswith("?ui_font=")
+    assert "drill_metric=revenue" in href
+    assert close_href.startswith("?ui_font=")
+    assert "drill_metric=revenue" in sort_href
+    assert "drill_sort=%E5%85%AC%E5%8F%B8" in sort_href
+    assert "drill_order=asc" in sort_href
+
+    app.st.session_state[app.UI_FONT_SIZE_SESSION_KEY] = "标准"
+    assert app._app_query_href({"drill_metric": "revenue"}).startswith("?ui_font=")
+    assert "drill_metric=revenue" in app._app_query_href({"drill_metric": "revenue"})
+    assert app._app_query_href() == "?ui_font=%E6%A0%87%E5%87%86"
+
+    app.st.session_state[app.UI_FONT_SIZE_SESSION_KEY] = app.UI_FONT_SIZE_DEFAULT_MODE
+    assert app._app_query_href({"drill_metric": "revenue"}) == "?drill_metric=revenue"
+    assert app._app_query_href() == "?"
+
+
+def test_global_font_size_control_does_not_mutate_navigation_state():
+    source = inspect.getsource(app._render_ui_font_size_control)
+    main_source = inspect.getsource(app.main)
+    grid_source = inspect.getsource(app._render_bi_kpi_grid)
+
+    assert "st.radio" in source
+    assert "horizontal=True" in source
+    assert "label_visibility=\"collapsed\"" in source
+    assert app.UI_FONT_SIZE_SESSION_KEY in source
+    assert "_sync_ui_font_size_query_param" in source
+    assert "nav_choice" not in source
+    assert "sidebar_expanded_modules" not in source
+    assert "nav_module" not in source
+    assert "_app_query_href" in grid_source
+    assert "st.markdown(_render_ui_font_size_css(_current_ui_font_size_mode()), unsafe_allow_html=True)" in main_source
+    assert main_source.index("_render_ui_font_size_css") < main_source.index("render_sidebar")
 
 
 def test_base_settings_entries_use_render_base_settings_and_default_tab():

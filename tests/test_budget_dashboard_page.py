@@ -7,6 +7,90 @@ from openpyxl import Workbook
 import app
 
 
+def test_budget_actual_period_months_use_pl_detail_ytd_and_latest_month(monkeypatch):
+    queries: list[str] = []
+
+    def fake_execute_sql(sql, params=None):
+        queries.append(sql)
+        return pd.DataFrame({"period": ["202604", "202605", "202606"]})
+
+    monkeypatch.setattr(app, "execute_sql", fake_execute_sql)
+    app._budget_actual_period_months_cached.clear()
+
+    months = app._budget_actual_period_months_cached("db", (("db", 1, 1, 1),))
+
+    assert months == {"2026": ["04", "05", "06"]}
+    assert queries
+    assert "FROM pl_detail" in queries[0]
+    assert "ytd_amount IS NOT NULL" in queries[0]
+    assert "income_statement" not in queries[0]
+
+
+def test_budget_actual_period_months_refresh_when_db_signature_changes(monkeypatch):
+    calls = []
+
+    def fake_execute_sql(sql, params=None):
+        calls.append(sql)
+        if len(calls) == 1:
+            return pd.DataFrame({"period": ["202606"]})
+        return pd.DataFrame({"period": ["202606", "202607"]})
+
+    monkeypatch.setattr(app, "execute_sql", fake_execute_sql)
+    app._budget_actual_period_months_cached.clear()
+
+    first = app._budget_actual_period_months_cached("db", (("db", 1, 1, 1),))
+    second = app._budget_actual_period_months_cached("db", (("db", 1, 2, 1),))
+
+    assert first == {"2026": ["06"]}
+    assert second == {"2026": ["06", "07"]}
+    assert len(calls) == 2
+
+
+def test_budget_month_state_defaults_to_latest_and_preserves_manual_rerun():
+    months_by_year = {"2026": ["04", "05", "06"]}
+
+    year, month, options, has_actual = app._resolve_budget_year_month_state(
+        ["2026"], months_by_year, None, None, "首页", None
+    )
+    assert (year, month, options, has_actual) == ("2026", "06", ["04", "05", "06"], True)
+
+    year, month, options, has_actual = app._resolve_budget_year_month_state(
+        ["2026"], months_by_year, "2026", "04", "全面预算", "2026"
+    )
+    assert (year, month, options, has_actual) == ("2026", "04", ["04", "05", "06"], True)
+
+
+def test_budget_month_default_ignores_later_non_pl_detail_periods():
+    months_by_year = {"2026": ["06"]}
+
+    year, month, options, has_actual = app._resolve_budget_year_month_state(
+        ["2026"], months_by_year, "2026", None, "首页", None
+    )
+
+    assert (year, month, options, has_actual) == ("2026", "06", ["06"], True)
+
+
+def test_budget_month_state_resets_invalid_month_and_year_change():
+    months_by_year = {"2026": ["04", "05", "06"], "2025": ["12"]}
+
+    assert app._resolve_budget_year_month_state(
+        ["2026", "2025"], months_by_year, "2026", "03", "全面预算", "2026"
+    )[1] == "06"
+    assert app._resolve_budget_year_month_state(
+        ["2026", "2025"], months_by_year, "2025", "06", "全面预算", "2026"
+    )[1] == "12"
+    assert app._resolve_budget_year_month_state(
+        ["2027"], months_by_year, "2027", "06", "全面预算", "2026"
+    ) == ("2027", "03", [f"{idx:02d}" for idx in range(1, 13)], False)
+
+
+def test_budget_dashboard_uses_budget_actual_month_helper_not_other_reports():
+    source = inspect.getsource(app.render_budget_dashboard)
+
+    assert "_budget_actual_period_months()" in source
+    assert '_get_year_month_options("income_statement")' not in source
+
+
 def _write_budget_workbook(path: Path) -> Path:
     wb = Workbook()
     ws = wb.active

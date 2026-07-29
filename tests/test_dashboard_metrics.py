@@ -550,13 +550,52 @@ def test_home_budget_card_summary_uses_budget_total_row():
     assert summary["status"] == "正常"
 
 
+def test_budget_execution_card_uses_clear_benchmark_rows():
+    import app
+
+    overview = pd.DataFrame(
+        [
+            {
+                "模块名称": "合计",
+                "收入完成率": 0.27,
+                "利润完成率": 0.22,
+                "时间进度": 0.25,
+                "收入进度差": 0.02,
+                "利润进度差": -0.03,
+                "状态": "滞后",
+            }
+        ]
+    )
+
+    html = app._render_budget_execution_panel({"progress": overview, "theory_completion": 0.25})
+
+    assert "home-budget-compare" in html
+    assert "收入完成" in html
+    assert "利润完成" in html
+    assert "27.0%" in html
+    assert "22.0%" in html
+    assert "时间进度 25.0%" in html
+    assert "超前 2.0 个百分点" in html
+    assert "滞后 3.0 个百分点" in html
+    assert "综合状态：滞后" in html
+    assert "复用全面预算口径" not in html
+    assert "点击查看经营单位进度" not in html
+    assert "收入偏离" not in html
+    assert "利润偏离" not in html
+    assert "home-budget-time-marker" in app.PAGE_CSS
+    assert "font-size: 1.48rem;" in app.PAGE_CSS
+    assert "height: 1.05rem;" in app.PAGE_CSS
+
+
 def test_home_card_group_modal_contract_and_lazy_loading():
     import app
 
     render_source = inspect.getsource(app.render_home)
+    import_upload_source = inspect.getsource(app._render_import_upload_tab)
     budget_panel_source = inspect.getsource(app._render_budget_execution_panel)
     operating_panel_source = inspect.getsource(app._render_operating_summary_panel)
     expense_panel_source = inspect.getsource(app._render_expense_analysis_panel)
+    expense_donut_source = inspect.getsource(app._home_expense_donut_html)
     funds_safety_panel_source = inspect.getsource(app._render_funds_safety_panel)
     funds_risk_panel_source = inspect.getsource(app._render_funds_turnover_risk_panel)
     company_rank_panel_source = inspect.getsource(app._render_company_profit_rank_panel)
@@ -590,6 +629,11 @@ def test_home_card_group_modal_contract_and_lazy_loading():
     assert "_load_home_card_group_detail_cached" not in company_rank_panel_source
     assert "_load_home_card_group_detail_cached" not in anomaly_panel_source
     assert "_load_home_card_group_detail_cached" not in funds_risk_panel_source
+    assert "home-budget-compare" in budget_panel_source
+    assert "home-expense-donut-layout" in expense_donut_source
+    assert "home-card-group-grid .home-card-group-link:not(.home-card-group-company-profit-rank) .bi-panel-title" in app.PAGE_CSS
+    assert "font-size: 1.32rem;" in app.PAGE_CSS
+    assert "home-card-group-grid .home-card-group-link:not(.home-card-group-company-profit-rank) .home-card-mini-value" in app.PAGE_CSS
     assert "_home_funds_rows_for_scope" not in funds_safety_panel_source
     assert "_home_funds_rows_for_scope" not in funds_risk_panel_source
     assert "_load_home_card_group_detail_cached" in layer_source
@@ -598,7 +642,19 @@ def test_home_card_group_modal_contract_and_lazy_loading():
     assert "home-detail-drawer" not in layer_source
     assert "home_group" in render_source
     assert "drill_metric not in HOME_DRILL_CONFIG" in render_source
-    assert app.PAGE_CSS.index(".bi-section-grid > .home-card-group-company-profit-rank") > app.PAGE_CSS.index(".bi-section-grid {")
+    assert 'class="bi-section-grid home-card-group-grid"' in render_source
+    assert 'class="bi-section-grid"' in import_upload_source
+    assert "home-card-group-grid" not in import_upload_source
+    section_grid_css = app.PAGE_CSS[
+        app.PAGE_CSS.index(".bi-section-grid {") : app.PAGE_CSS.index(".home-card-group-grid {")
+    ]
+    assert "grid-template-columns: repeat(3, minmax(0, 1fr));" in section_grid_css
+    home_grid_css = app.PAGE_CSS[
+        app.PAGE_CSS.index(".home-card-group-grid {") : app.PAGE_CSS.index(".home-card-group-grid > .home-card-group-company-profit-rank")
+    ]
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in home_grid_css
+    assert "align-items: start;" in home_grid_css
+    assert app.PAGE_CSS.index(".home-card-group-grid > .home-card-group-company-profit-rank") > app.PAGE_CSS.index(".home-card-group-grid {")
     assert "grid-column: 1 / -1;" in app.PAGE_CSS
     assert ".home-rank-two-col" in app.PAGE_CSS
     assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in app.PAGE_CSS
@@ -606,19 +662,34 @@ def test_home_card_group_modal_contract_and_lazy_loading():
     assert ".home-rank-column-head" in app.PAGE_CSS
     assert ".home-rank-dual-margin" in app.PAGE_CSS
     assert ".home-rank-dual-margin.loss" in app.PAGE_CSS
+    assert ".home-card-group-company-profit-rank .bi-panel-title" in app.PAGE_CSS
+    assert ".home-card-group-company-profit-rank .home-rank-column-title" in app.PAGE_CSS
+    assert "height: 0.62rem;" in app.PAGE_CSS
     assert "white-space: nowrap;" in app.PAGE_CSS
     mobile_css = app.PAGE_CSS[app.PAGE_CSS.index("@media (max-width: 1100px)") :]
     assert ".home-rank-two-col" in mobile_css
     assert "grid-template-columns: 1fr;" in mobile_css
     assert ".home-card-group-company-profit-rank .home-rank-dual-row" in app.PAGE_CSS
+    assert render_source.index("_render_budget_execution_panel") < render_source.index("_render_operating_summary_panel")
+    assert render_source.index("_render_operating_summary_panel") < render_source.index("_render_expense_analysis_panel")
+    assert render_source.index("_render_expense_analysis_panel") < render_source.index("_render_operating_anomaly_panel")
+    assert render_source.index("_render_operating_anomaly_panel") < render_source.index("_render_company_profit_rank_panel")
     assert render_source.index("_render_company_profit_rank_panel") < render_source.index("_render_funds_safety_panel")
+    assert render_source.index("_render_funds_safety_panel") < render_source.index("_render_funds_turnover_risk_panel")
+    assert "资金保障能力" in funds_safety_panel_source
+    assert "home-funds-assurance" in funds_safety_panel_source
+    assert "近6月月均经营成本" in funds_safety_panel_source
+    assert "3个月安全资金线" in funds_safety_panel_source
+    assert "安全余量" in funds_safety_panel_source
+    assert "home-funds-assurance-grid" in app.PAGE_CSS
+    assert "home-funds-assurance-conclusion" in app.PAGE_CSS
     assert list(app.HOME_CARD_GROUP_CONFIG) == [
         "budget_execution",
         "operating_summary",
         "expense_analysis",
-        "funds_safety",
-        "company_profit_rank",
         "operating_anomaly",
+        "company_profit_rank",
+        "funds_safety",
         "funds_turnover_risk",
     ]
 
@@ -644,10 +715,24 @@ def test_home_expense_card_group_shows_bridge_note_without_changing_amounts():
 
     html = app._render_expense_analysis_panel(analysis)
 
+    assert "home-expense-donut-layout" in html
+    assert "conic-gradient" in html
+    assert "六类重点费用合计" in html
+    assert "home-expense-bridge-rows" in html
+    assert "900" in html
+    assert "人工成本" in html
+    assert "88.9%" in html
+    assert "租金水电物业" in html
+    assert "11.1%" in html
     assert "管理费服务费" in html
     assert "其他费用" in html
     assert "成本费用合计 = 六类重点费用 + 管理费服务费 + 其他费用" in html
-    assert "口径状态" in html
+    assert "口径状态" not in html
+    assert "home-expense-legend" in app.PAGE_CSS
+    assert "grid-template-columns: minmax(0, 0.64fr) minmax(0, 0.36fr);" in app.PAGE_CSS
+    assert "width: clamp(320px, 32vw, 520px);" in app.PAGE_CSS
+    assert "width: min(360px, 72vw);" in app.PAGE_CSS
+    assert "font-size: 1.38rem;" in app.PAGE_CSS
 
 
 def test_home_p0_3c_company_rank_card_group_detail_and_dual_bars(monkeypatch):
@@ -844,48 +929,163 @@ def test_home_p0_3c_operating_anomaly_thresholds_missing_history_and_tags(monkey
         assert summary_counts[label] == 1
     assert "缺历史公司" not in detail["公司"].tolist()
     assert "同比/环比经营波动" in html
-    assert "沿用现有阈值" in html
+    assert "按异常事项数统计；缺可比期间不计入异常" in html
+    assert "沿用现有阈值" not in html
     assert "home-anomaly-tag" in html
 
 
-def test_home_p0_3b_expense_card_group_detail_uses_existing_analysis(monkeypatch):
+def test_home_operating_anomaly_profit_edge_cases_and_uncomparable_values(monkeypatch):
     import app
+
+    comparison_by_period = {
+        "202606": pd.DataFrame(
+            [
+                {"company_code": "001", "公司": "盈转亏公司", "业务板块": "测试", "收入": 80.0, "成本费用合计": 50.0, "净利润": -5.0, "净利率": -0.0625},
+                {"company_code": "002", "公司": "亏损扩大公司", "业务板块": "测试", "收入": 0.0, "成本费用合计": 30.0, "净利润": -20.0, "净利率": None},
+                {"company_code": "003", "公司": "亏损收窄公司", "业务板块": "测试", "收入": 20.0, "成本费用合计": 10.0, "净利润": -5.0, "净利率": -0.25},
+                {"company_code": "004", "公司": "扭亏公司", "业务板块": "测试", "收入": 20.0, "成本费用合计": 10.0, "净利润": 5.0, "净利率": 0.25},
+            ]
+        ),
+        "202605": pd.DataFrame(
+            [
+                {"company_code": "001", "公司": "盈转亏公司", "业务板块": "测试", "收入": 100.0, "成本费用合计": 50.0, "净利润": 10.0, "净利率": 0.10},
+                {"company_code": "002", "公司": "亏损扩大公司", "业务板块": "测试", "收入": 0.0, "成本费用合计": 10.0, "净利润": -10.0, "净利率": None},
+                {"company_code": "003", "公司": "亏损收窄公司", "业务板块": "测试", "收入": 20.0, "成本费用合计": 10.0, "净利润": -10.0, "净利率": -0.50},
+                {"company_code": "004", "公司": "扭亏公司", "业务板块": "测试", "收入": 20.0, "成本费用合计": 10.0, "净利润": -10.0, "净利率": -0.50},
+            ]
+        ),
+        "202506": pd.DataFrame(columns=["company_code", "公司", "业务板块", "收入", "成本费用合计", "净利润", "净利率"]),
+    }
 
     monkeypatch.setattr(
         app,
-        "_home_expense_analysis_for_scope",
-        lambda period, codes: {
-            "categories": pd.DataFrame(
-                [
-                    {
-                        "费用类别": "人工成本",
-                        "本月金额": 100.0,
-                        "占成本费用比": 0.5,
-                        "占收入比": 0.2,
-                        "状态说明": "沿用现有口径",
-                    }
-                ]
-            ),
-            "ranking": pd.DataFrame(
-                [
-                    {
-                        "费用类别": "人工成本",
-                        "主要经营单位": "测试公司",
-                        "本月金额": 60.0,
-                        "占比": 0.6,
-                        "判断": "沿用现有口径",
-                    }
-                ]
-            ),
-        },
+        "_home_company_operating_metrics_for_scope",
+        lambda period, codes: comparison_by_period.get(period, pd.DataFrame()).copy(),
     )
 
-    detail = app._load_home_card_group_detail("expense_analysis", "202603", ["001"])
+    comparison = app._home_company_operating_comparison_frame("202606", ("001", "002", "003", "004"))
+    assert comparison.loc[comparison["company_code"] == "001", "利润环比"].iloc[0] == "由盈转亏"
+    assert comparison.loc[comparison["company_code"] == "002", "利润环比"].iloc[0] == "亏损扩大"
+    assert comparison.loc[comparison["company_code"] == "003", "利润环比"].iloc[0] == "亏损收窄"
+    assert comparison.loc[comparison["company_code"] == "004", "利润环比"].iloc[0] == "扭亏"
+    assert comparison.loc[comparison["company_code"] == "002", "收入环比"].iloc[0] == app.HOME_UNCOMPARABLE_TEXT
+    assert comparison["收入同比"].isna().all()
+    assert comparison["利润同比"].isna().all()
 
-    assert list(detail.columns) == ["明细类型", "费用类别", "公司", "业务板块", "金额", "占成本费用比", "占收入比", "占比", "状态"]
-    assert detail["明细类型"].tolist() == ["费用类别", "公司排行"]
-    assert detail.iloc[0]["费用类别"] == "人工成本"
-    assert detail.iloc[1]["公司"] == "测试公司"
+    detail = pd.DataFrame(
+        [
+            anomaly
+            for _, row in comparison.iterrows()
+            if (anomaly := app._home_anomaly_row_from_comparison(row)) is not None
+        ]
+    )
+    assert detail["公司"].tolist() == ["盈转亏公司", "亏损扩大公司"]
+    assert "利润环比下降（由盈转亏）" in detail.iloc[0]["异常类型"]
+    assert "利润环比下降（亏损扩大）" in detail.iloc[1]["异常类型"]
+    assert set(detail["异常程度/状态"]) == {"高风险"}
+    counts = app._home_operating_anomaly_counts(detail)
+    assert counts["利润环比下降"] == 2
+    assert counts["利润同比下降"] == 0
+    assert counts["收入同比下降"] == 0
+
+
+def test_home_company_rank_filters_missing_metrics_and_sorts_ties_by_company_code(monkeypatch):
+    import app
+
+    source = pd.DataFrame(
+        [
+            {"id": 1, "company_code": "002", "公司": "B公司", "item_code": "OPERATING_收入合计", "item_name": "收入合计", "amount": 100.0},
+            {"id": 2, "company_code": "002", "公司": "B公司", "item_code": "OPERATING_成本费用合计", "item_name": "成本费用合计", "amount": 80.0},
+            {"id": 3, "company_code": "002", "公司": "B公司", "item_code": "OPERATING_净利润", "item_name": "净利润", "amount": 20.0},
+            {"id": 4, "company_code": "001", "公司": "A公司", "item_code": "OPERATING_收入合计", "item_name": "收入合计", "amount": 100.0},
+            {"id": 5, "company_code": "001", "公司": "A公司", "item_code": "OPERATING_成本费用合计", "item_name": "成本费用合计", "amount": 80.0},
+            {"id": 6, "company_code": "001", "公司": "A公司", "item_code": "OPERATING_净利润", "item_name": "净利润", "amount": 20.0},
+            {"id": 7, "company_code": "003", "公司": "缺利润公司", "item_code": "OPERATING_收入合计", "item_name": "收入合计", "amount": 0.0},
+            {"id": 8, "company_code": "003", "公司": "缺利润公司", "item_code": "OPERATING_成本费用合计", "item_name": "成本费用合计", "amount": 10.0},
+            {"id": 9, "company_code": "10101", "公司": "伪合并节点", "item_code": "OPERATING_收入合计", "item_name": "收入合计", "amount": 999.0},
+            {"id": 10, "company_code": "10101", "公司": "伪合并节点", "item_code": "OPERATING_净利润", "item_name": "净利润", "amount": 999.0},
+            {"id": 11, "company_code": "10101", "公司": "伪合并节点", "item_code": "OPERATING_成本费用合计", "item_name": "成本费用合计", "amount": 0.0},
+        ]
+    )
+    monkeypatch.setattr(app, "_query_operating_card_source_rows", lambda period, codes: source.copy())
+    monkeypatch.setattr(app, "_home_company_business_group_lookup", lambda: {})
+    app._home_company_operating_metrics_for_scope.clear()
+    app._home_company_rank_summary_for_scope.clear()
+
+    metrics = app._home_company_operating_metrics_for_scope("202606", ("001", "002", "003", "10101"))
+    assert "伪合并节点" not in metrics["公司"].tolist()
+    assert metrics["公司"].tolist()[:2] == ["A公司", "B公司"]
+    missing_profit = metrics.loc[metrics["公司"] == "缺利润公司", "净利润"].iloc[0]
+    assert pd.isna(missing_profit)
+    assert pd.isna(metrics.loc[metrics["公司"] == "缺利润公司", "净利率"].iloc[0])
+
+    summary = app._home_company_rank_summary_for_scope("202606", ("001", "002", "003", "10101"))
+    profit_top, _ = app._home_company_rank_panel_slices(summary)
+    assert profit_top["公司"].tolist()[:2] == ["A公司", "B公司"]
+
+
+def test_home_expense_card_group_detail_uses_module_fee_table(monkeypatch):
+    import app
+
+    source = pd.DataFrame(
+        [
+            {"company_code": "001", "company_name": "模块公司A", "account_code": "OPERATING_001_成本费用合计", "source_item_name": "成本费用合计", "current_amount": 100000.0},
+            {"company_code": "001", "company_name": "模块公司A", "account_code": "DETAIL_001_工资", "source_item_name": "工资", "current_amount": 30000.0},
+            {"company_code": "001", "company_name": "模块公司A", "account_code": "DETAIL_001_房租", "source_item_name": "房租", "current_amount": 20000.0},
+            {"company_code": "001", "company_name": "模块公司A", "account_code": "DETAIL_001_管理费服务费", "source_item_name": "管理费服务费", "current_amount": 10000.0},
+            {"company_code": "002", "company_name": "模块公司B", "account_code": "OPERATING_002_成本费用合计", "source_item_name": "成本费用合计", "current_amount": 50000.0},
+            {"company_code": "002", "company_name": "模块公司B", "account_code": "DETAIL_002_工资", "source_item_name": "工资", "current_amount": 15000.0},
+            {"company_code": "002", "company_name": "模块公司B", "account_code": "DETAIL_002_办公费", "source_item_name": "办公费", "current_amount": 5000.0},
+            {"company_code": "002", "company_name": "模块公司B", "account_code": "DETAIL_002_管理费服务费", "source_item_name": "管理费服务费", "current_amount": 5000.0},
+            {"company_code": "009", "company_name": "真实未分组公司", "account_code": "OPERATING_009_成本费用合计", "source_item_name": "成本费用合计", "current_amount": 10000.0},
+            {"company_code": "009", "company_name": "真实未分组公司", "account_code": "DETAIL_009_工资", "source_item_name": "工资", "current_amount": 12000.0},
+            {"company_code": "合计", "company_name": "合计", "account_code": "DETAIL_TOTAL_工资", "source_item_name": "工资", "current_amount": 999999.0},
+        ]
+    )
+    monkeypatch.setattr(app, "get_operating_summary_source_detail", lambda period, codes: source)
+    monkeypatch.setattr(
+        app,
+        "_operating_card_group_scopes",
+        lambda codes: [
+            {"key": "module", "label": "测试模块", "codes": ["001", "002"], "is_module": True},
+            {"key": "company:009", "label": "009", "codes": ["009"], "is_module": False},
+        ],
+    )
+
+    detail = app._load_home_card_group_detail("expense_analysis", "202603", ["001", "002", "009"])
+
+    assert list(detail.columns) == [
+        "模块/公司",
+        "人工成本",
+        "租金水电物业",
+        "折旧摊销",
+        "交际接待交通",
+        "办公行政",
+        "财务费用",
+        "管理费服务费",
+        "其他费用（或待核对差额）",
+        "成本费用合计",
+        "占集团成本费用比",
+    ]
+    assert detail["模块/公司"].tolist() == ["测试模块", "真实未分组公司", "合计"]
+    module = detail[detail["模块/公司"] == "测试模块"].iloc[0]
+    ungrouped = detail[detail["模块/公司"] == "真实未分组公司"].iloc[0]
+    total = detail[detail["模块/公司"] == "合计"].iloc[0]
+    assert module["人工成本"] == pytest.approx(4.5)
+    assert module["租金水电物业"] == pytest.approx(2.0)
+    assert module["办公行政"] == pytest.approx(0.5)
+    assert module["管理费服务费"] == pytest.approx(1.5)
+    assert module["其他费用（或待核对差额）"] == pytest.approx(6.5)
+    assert module["成本费用合计"] == pytest.approx(15.0)
+    assert module["占集团成本费用比"] == pytest.approx(0.9375)
+    assert ungrouped["其他费用（或待核对差额）"] == pytest.approx(-0.2)
+    assert total["成本费用合计"] == pytest.approx(16.0)
+    assert total["占集团成本费用比"] == pytest.approx(1.0)
+    assert "费用排行" not in app.HOME_CARD_GROUP_CONFIG["expense_analysis"]["subtitle"]
+    assert "模块排行" not in app.HOME_CARD_GROUP_CONFIG["expense_analysis"]["subtitle"]
+
+    sorted_detail = app._sort_metric_drilldown_df(detail, "成本费用合计", "desc")
+    assert sorted_detail.iloc[-1]["模块/公司"] == "合计"
 
 
 def test_home_p0_3b_funds_card_group_details_reuse_current_warning_rows(monkeypatch):
@@ -943,6 +1143,39 @@ def test_home_p0_3b_funds_card_group_details_reuse_current_warning_rows(monkeypa
     assert set(safety["公司"]) == {"资金紧张公司", "资金关注公司", "资金安全公司"}
     assert set(risk["公司"]) == {"资金紧张公司", "资金关注公司"}
     assert "最低资金周转系数" not in inspect.getsource(app._render_funds_turnover_risk_panel)
+    source = inspect.getsource(app._render_funds_turnover_risk_panel)
+    assert "home-card-mini-track" not in source
+    assert "home-card-mini-fill" not in source
+    summary = app._home_funds_summary_from_rows(rows)
+    assert summary["纳入口径近6月平均经营成本合计"] == pytest.approx(120.0)
+    assert summary["三个月安全资金线"] == pytest.approx(360.0)
+    assert summary["安全余量"] == pytest.approx(-60.0)
+    assert summary["集团资金周转系数"] == pytest.approx(2.5)
+    safety_html = app._render_funds_safety_panel(summary, None)
+    assert "资金保障能力" in safety_html
+    assert "近6月月均经营成本" in safety_html
+    assert "3个月安全资金线" in safety_html
+    assert "安全余量" in safety_html
+    assert safety_html.count("集团资金周转系数") == 1
+    assert "距离安全线差 0.5 个月 / 需要关注" in safety_html
+    assert "资金类仅取科目余额表；其他应收/应付仅取公司往来。" in safety_html
+    empty_summary = app._home_funds_summary_from_rows(pd.DataFrame())
+    assert empty_summary["纳入口径近6月平均经营成本合计"] is None
+    assert "资金数据待接入" in app._render_funds_safety_panel(empty_summary, None)
+    html = app._render_funds_turnover_risk_panel(summary, None)
+    assert "home-risk-summary-strip" in html
+    assert "资金紧张<strong>1 家</strong>" in html
+    assert "资金关注<strong>1 家</strong>" in html
+    assert "资金安全<strong>1 家</strong>" in html
+    assert "风险优先清单" in html
+    assert "资金紧张公司" in html
+    assert "资金关注公司" in html
+    assert "1.00" in html
+    assert "2.00" in html
+    assert "home-risk-status tight" in html
+    assert "home-risk-status watch" in html
+    assert "点击查看全部公司" in html
+    assert "home-card-mini-track" not in html
 
 
 def test_home_card_group_table_sort_uses_independent_query_params():
@@ -1034,8 +1267,29 @@ def test_home_dashboard_drill_config_covers_all_eight_kpis():
     assert "show_metric_drilldown_dialog" not in render_source
     assert "_kpi_comparisons_html" in kpi_source
     assert "selected_metric_key" in kpi_source
+    assert "extra_grid_class" in kpi_source
+    assert 'extra_grid_class="home-top-kpi-grid"' in render_source
     assert "bi-kpi-card selected" in kpi_source
-    assert 'href = "?"' in kpi_source
+    home_kpi_css = app.PAGE_CSS[
+        app.PAGE_CSS.index(".home-top-kpi-grid .bi-kpi-card")
+        : app.PAGE_CSS.index(".home-drill-panel-title")
+    ]
+    assert ".home-top-kpi-grid .bi-kpi-label" in home_kpi_css
+    assert "font-size: 1.03rem;" in home_kpi_css
+    assert "font-size: 2rem;" in home_kpi_css
+    assert "font-size: 0.98rem;" in home_kpi_css
+    assert "font-size: 0.9rem;" in home_kpi_css
+    global_label_css = app.PAGE_CSS[
+        app.PAGE_CSS.index(".bi-kpi-label {") : app.PAGE_CSS.index(".bi-kpi-value {")
+    ]
+    global_value_css = app.PAGE_CSS[
+        app.PAGE_CSS.index(".bi-kpi-value {") : app.PAGE_CSS.index(".bi-kpi-value-link {")
+    ]
+    assert "font-size: 0.78rem;" in global_label_css
+    assert "font-size: 1.03rem;" not in global_label_css
+    assert "font-size: 1.42rem;" in global_value_css
+    assert "font-size: 2rem;" not in global_value_css
+    assert "_app_query_href()" in kpi_source
     assert {app._metric_drilldown_layer_type(key) for key in app.HOME_DRILL_CONFIG} == {"modal"}
     assert "home-detail-overlay" in layer_source
     assert "z-index: 1000000" in app.PAGE_CSS

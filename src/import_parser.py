@@ -800,6 +800,7 @@ class PlDetailParser(BaseParser):
                     "item_name": name,
                     "category": self._income_cost_category(name, income_section),
                     "amount": current_value,
+                    "ytd_amount": ytd_value,
                     "dept_code": "",
                     "dept_name": "",
                     "remark": f"本年累计={ytd_value:.2f}; 来源=收入成本费用表第{row_idx + 1}行",
