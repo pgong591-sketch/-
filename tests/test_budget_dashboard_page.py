@@ -810,8 +810,9 @@ def test_quality_center_confirmed_mappings_and_special_statuses():
     )
     actual = pd.DataFrame(
         [
-            {"actual_name": "南城虎翼", "company_code": "101010133", "actual_income": 11000.0},
-            {"actual_name": "茶山学前", "company_code": "101010131", "actual_income": 22000.0},
+            {"actual_name": "南城虎翼营", "company_code": "101010133", "actual_income": 11000.0},
+            {"actual_name": "茶山学前校区", "company_code": "101010131", "actual_income": 22000.0},
+            {"actual_name": "南城华凯校区", "company_code": "101010102", "actual_income": 33000.0},
             {"actual_name": "南城", "company_code": "101010133", "actual_income": 33000.0},
         ]
     )
@@ -820,17 +821,17 @@ def test_quality_center_confirmed_mappings_and_special_statuses():
     view = app._budget_quality_center_drilldown_view(targets, 0.25, actual)
     issues = app.quality_center_unmatched_items(matched)
 
-    assert matched.loc[matched["campus_name"] == "南城虎翼营", "actual_name"].iloc[0] == "南城虎翼"
-    assert matched.loc[matched["campus_name"] == "茶山校区", "actual_name"].iloc[0] == "茶山学前"
-    assert matched.loc[matched["campus_name"] == "华凯校区", "match_status"].iloc[0] == "待确认"
-    assert "避免重复加总" in matched.loc[matched["campus_name"] == "华凯校区", "match_note"].iloc[0]
-    assert set(matched["match_status"]) == {"已匹配", "待确认", "待开业", "已取消"}
-    assert view.loc[view["校区名称"] == "华凯校区", "实际收入"].iloc[0] == "待确认"
+    assert matched.loc[matched["campus_name"] == "南城虎翼营", "actual_name"].iloc[0] == "南城虎翼营"
+    assert matched.loc[matched["campus_name"] == "茶山校区", "actual_name"].iloc[0] == "茶山学前校区"
+    assert matched.loc[matched["campus_name"] == "华凯校区", "actual_name"].iloc[0] == "南城华凯校区"
+    assert matched.loc[matched["campus_name"] == "华凯校区", "company_code"].iloc[0] == "101010102"
+    assert set(matched["match_status"]) == {"已匹配", "待开业", "已取消"}
+    assert view.loc[view["校区名称"] == "华凯校区", "实际收入"].iloc[0] == 33000.0
     assert view.loc[view["校区名称"] == "松山湖校区", "实际收入"].iloc[0] == "待开业"
     assert view.loc[view["校区名称"] == "松山湖校区", "状态"].iloc[0] == "待开业"
     assert view.loc[view["校区名称"] == "产品中心直营校", "实际收入"].iloc[0] == "已取消"
     assert view.loc[view["校区名称"] == "产品中心直营校", "状态"].iloc[0] == "已取消"
-    assert issues["预算校区名称"].tolist() == ["华凯校区"]
+    assert issues.empty
 
 
 def test_budget_quality_center_mapping_comes_from_base_settings_service():

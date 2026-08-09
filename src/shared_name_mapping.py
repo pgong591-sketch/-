@@ -14,13 +14,99 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import text
+
 from .base_settings_service import get_budget_campus_name_mappings
-from .db_connection import PROJECT_ROOT, execute_sql
+from .company_aliases import ensure_company_alias_table
+from .db_connection import PROJECT_ROOT, execute_sql, get_session
 
 
 SHARED_NAME_MAPPING_SCHEMA_VERSION = "finance_dw.shared_name_mapping.v1"
 SHARED_NAME_MAPPING_SOURCE_SYSTEM = "finance_dw"
 SHARED_NAME_MAPPING_ENV = "FINANCE_SHARED_NAME_MAPPING_PATH"
+CONFIRMED_SHARED_COMPANY_ALIASES: tuple[tuple[str, str], ...] = (
+    ("华凯校区", "101010102"),
+    ("南城华凯校区", "101010102"),
+    ("南城校区", "101010102"),
+    ("南城虎翼营", "101010133"),
+    ("南城虎翼", "101010133"),
+    ("寮步校区", "101010130"),
+    ("寮步石大校区", "101010130"),
+    ("茶山校区", "101010131"),
+    ("茶山学前校区", "101010131"),
+)
+
+
+def ensure_confirmed_shared_company_aliases(
+    *,
+    source: str = "shared_mapping_user_confirmed_20260729",
+) -> dict[str, Any]:
+    """Idempotently persist user-confirmed shared aliases into company_aliases."""
+    ensure_company_alias_table()
+    session = get_session()
+    inserted = 0
+    reactivated = 0
+    unchanged = 0
+    conflicts: list[dict[str, str]] = []
+    try:
+        for alias, company_code in CONFIRMED_SHARED_COMPANY_ALIASES:
+            existing = session.execute(
+                text(
+                    """
+                    SELECT company_code, COALESCE(status, 1) AS status
+                    FROM company_aliases
+                    WHERE alias = :alias
+                    """
+                ),
+                {"alias": alias},
+            ).fetchone()
+            if existing and str(existing[0]).strip() != company_code:
+                conflicts.append(
+                    {
+                        "alias": alias,
+                        "existing_company_code": str(existing[0]).strip(),
+                        "confirmed_company_code": company_code,
+                    }
+                )
+                continue
+            if existing:
+                if int(existing[1] or 0) != 1:
+                    session.execute(
+                        text(
+                            """
+                            UPDATE company_aliases
+                            SET status = 1,
+                                source = :source,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE alias = :alias
+                            """
+                        ),
+                        {"alias": alias, "source": source},
+                    )
+                    reactivated += 1
+                else:
+                    unchanged += 1
+                continue
+            session.execute(
+                text(
+                    """
+                    INSERT INTO company_aliases (alias, company_code, source, status)
+                    VALUES (:alias, :company_code, :source, 1)
+                    """
+                ),
+                {"alias": alias, "company_code": company_code, "source": source},
+            )
+            inserted += 1
+        if conflicts:
+            session.rollback()
+            return {"inserted": 0, "reactivated": 0, "unchanged": unchanged, "conflicts": conflicts}
+        session.commit()
+        return {"inserted": inserted, "reactivated": reactivated, "unchanged": unchanged, "conflicts": []}
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
 
 def _clean(value: Any) -> str:

@@ -294,9 +294,11 @@ def test_budget_campus_mapping_records_are_exposed_from_base_settings():
     special = get_budget_campus_special_statuses()
     records = get_budget_campus_mapping_records()
 
-    assert mappings["南城虎翼营"] == ("南城虎翼",)
-    assert mappings["茶山校区"] == ("茶山学前",)
-    assert "南城" in mappings["华凯校区"]
+    assert mappings["南城虎翼营"] == ("南城虎翼营", "南城虎翼")
+    assert mappings["茶山校区"] == ("茶山学前校区",)
+    assert mappings["寮步校区"] == ("寮步石大校区",)
+    assert mappings["华凯校区"] == ("华凯校区", "南城华凯校区", "南城校区")
+    assert "南城" not in mappings["华凯校区"]
     assert special["松山湖校区"][0] == "待开业"
     assert special["产品中心直营校"][0] == "已取消"
     assert set(records["预算校区名称"]) >= {"南城虎翼营", "茶山校区", "华凯校区", "松山湖校区", "产品中心直营校"}
