@@ -1,6 +1,7 @@
 # Local environment
 .DS_Store
 .env
+.env.*
 .venv/
 venv/
 ENV/
@@ -17,9 +18,19 @@ __pycache__/
 *.log
 .dbsync.local.json
 
+# 校管家本地登录态和接口探测产物，禁止提交
+.xgj_browser_profile/
+xgj_browser_profile/
+xgj_session/
+xgj_runtime/
+*cookie*
+*token*
+
 # Real business data and generated files
 backups/
 data/
+outputs/
+tmp/
 sync/
 .finance_dw_sync/
 .finance_dw_sync*/
