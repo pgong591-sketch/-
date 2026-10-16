@@ -12,6 +12,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.codex_tmp/
 
 # Streamlit local secrets and runtime logs
 .streamlit/secrets.toml
